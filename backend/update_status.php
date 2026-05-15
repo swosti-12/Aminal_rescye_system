@@ -3,10 +3,7 @@ require_once 'auth.php';
 
 header('Content-Type: application/json');
 
-if (!is_logged_in() || $_SESSION['role'] !== 'rescuer') {
-    echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-    exit;
-}
+require_role('rescuer');
 
 $data = json_decode(file_get_contents("php://input"), true);
 

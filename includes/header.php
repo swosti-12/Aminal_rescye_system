@@ -1,7 +1,8 @@
 <?php
-if (session_status() == PHP_SESSION_NONE) {
-    session_start();
+if (!class_exists('SessionManager', false)) {
+    require_once __DIR__ . '/../backend/SessionManager.php';
 }
+SessionManager::bootstrap();
 if (!isset($body_class)) {
     $body_class = '';
 }
@@ -69,10 +70,36 @@ if (isset($pdo)) {
                     <li><a href="contact.php">Contact</a></li>
                 </ul>
                 <div class="nav-actions">
-                    <?php if (isset($_SESSION['user_id'])): ?>
-                        <?php if ($_SESSION['role'] == 'admin'): ?>
+                    <?php
+                    $ars_slots = SessionManager::getAllSlots();
+                    $ars_context = SessionManager::getCurrentContext();
+                    if ($ars_context === null && $ars_slots !== []) {
+                        $ars_context = array_key_first($ars_slots);
+                        SessionManager::activateRole($ars_context);
+                    }
+                    ?>
+                    <?php if ($ars_context !== null && isset($ars_slots[$ars_context])): ?>
+                        <span class="nav-session-badge" title="Independent session for this role; other roles may stay signed in other tabs." style="font-size:0.72rem;font-weight:600;color:#4338ca;background:#eef2ff;border:1px solid #c7d2fe;border-radius:999px;padding:0.35rem 0.65rem;white-space:nowrap;">
+                            <i class="fa-solid fa-user-check" aria-hidden="true"></i>
+                            Logged in as: <?php echo htmlspecialchars(SessionManager::getSessionLabel($ars_context)); ?>
+                        </span>
+                        <?php if (count($ars_slots) > 1): ?>
+                            <span style="font-size:0.68rem;color:#64748b;max-width:140px;line-height:1.3;" title="Informational only">
+                                +<?php echo count($ars_slots) - 1; ?> other role<?php echo count($ars_slots) > 2 ? 's' : ''; ?> active
+                            </span>
+                        <?php endif; ?>
+                        <?php if ($ars_context === 'admin'): ?>
                             <a href="admin_dashboard.php" class="nav-actions__link"><i class="fa-solid fa-gauge-high"></i> Dashboard</a>
-                        <?php elseif ($_SESSION['role'] == 'rescuer'): ?>
+                        <?php elseif ($ars_context === 'rescuer'): ?>
+                            <a href="rescuer_dashboard.php" class="nav-actions__link"><i class="fa-solid fa-truck-medical"></i> Dashboard</a>
+                        <?php else: ?>
+                            <a href="user_dashboard.php" class="nav-actions__link"><i class="fa-solid fa-house-chimney"></i> Dashboard</a>
+                        <?php endif; ?>
+                        <a href="logout.php?role=<?php echo urlencode($ars_context); ?>" class="btn btn-nav btn-nav--outline">Logout</a>
+                    <?php elseif (isset($_SESSION['user_id'])): ?>
+                        <?php if (($_SESSION['role'] ?? '') === 'admin'): ?>
+                            <a href="admin_dashboard.php" class="nav-actions__link"><i class="fa-solid fa-gauge-high"></i> Dashboard</a>
+                        <?php elseif (($_SESSION['role'] ?? '') === 'rescuer'): ?>
                             <a href="rescuer_dashboard.php" class="nav-actions__link"><i class="fa-solid fa-truck-medical"></i> Dashboard</a>
                         <?php else: ?>
                             <a href="user_dashboard.php" class="nav-actions__link"><i class="fa-solid fa-house-chimney"></i> Dashboard</a>

@@ -3,26 +3,10 @@
  * JSON API: start/update/stop logged-in rescuer live location tracking.
  * Stores location in MySQL. Fault-tolerant — won't fail if rescuers/rescuer_locations tables are missing.
  */
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
 header('Content-Type: application/json; charset=utf-8');
 
-require_once __DIR__ . '/db_config.php';
-
-if (!isset($_SESSION['user_id'])) {
-    http_response_code(401);
-    echo json_encode(['ok' => false, 'error' => 'Unauthorized']);
-    exit;
-}
-
-$role = $_SESSION['role'] ?? '';
-if ($role !== 'rescuer') {
-    http_response_code(403);
-    echo json_encode(['ok' => false, 'error' => 'Forbidden']);
-    exit;
-}
+require_once __DIR__ . '/auth.php';
+require_role('rescuer');
 
 $raw = file_get_contents('php://input');
 $input = json_decode($raw, true);

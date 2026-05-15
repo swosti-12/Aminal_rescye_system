@@ -1,5 +1,6 @@
 <?php
 require_once 'backend/auth.php';
+require_once __DIR__ . '/backend/Services/GeocodingService.php';
 require_login();
 require_role('rescuer');
 
@@ -20,6 +21,32 @@ function rescuer_owns_case(PDO $pdo, int $caseId, int $rescuerId): bool {
     $st = $pdo->prepare('SELECT id FROM rescue_cases WHERE id = ? AND assigned_rescuer_id = ?');
     $st->execute([$caseId, $rescuerId]);
     return (bool)$st->fetch();
+}
+
+/** @return array{text: string, needs_geocode: bool, lat: ?float, lon: ?float, case_id: int} */
+function rescuer_case_location_meta(array $case): array {
+    $lat = isset($case['latitude']) ? (float)$case['latitude'] : null;
+    $lon = isset($case['longitude']) ? (float)$case['longitude'] : null;
+    $coords = ($lat !== null && $lon !== null)
+        ? GeocodingService::coordinateFallback($lat, $lon)
+        : '—';
+    $caseId = (int)($case['id'] ?? 0);
+
+    if (!empty($case['request_location'])) {
+        return ['text' => trim((string)$case['request_location']), 'needs_geocode' => false, 'lat' => $lat, 'lon' => $lon, 'case_id' => $caseId];
+    }
+    if (!empty($case['address'])) {
+        return ['text' => trim((string)$case['address']), 'needs_geocode' => false, 'lat' => $lat, 'lon' => $lon, 'case_id' => $caseId];
+    }
+    return ['text' => $coords, 'needs_geocode' => true, 'lat' => $lat, 'lon' => $lon, 'case_id' => $caseId];
+}
+
+function rescuer_location_label(string $text): string {
+    $text = trim($text);
+    if ($text === '' || stripos($text, 'location:') === 0) {
+        return $text !== '' ? $text : 'Location: —';
+    }
+    return 'Location: ' . $text;
 }
 
 function notify_reporter(PDO $pdo, int $caseId, string $message, string $category = 'status_update'): void {
@@ -421,12 +448,14 @@ $body_class = 'rescuer-dashboard-page';
                     <?php foreach ($active_cases as $case): ?>
                         <?php
                         $workflow = $case['status'] === 'pending' ? 'pending' : 'in_progress';
-                        $locText = $case['request_location'] ?? ($case['latitude'] . ', ' . $case['longitude']);
+                        $locMeta = rescuer_case_location_meta($case);
+                        $locText = $locMeta['text'];
                         $detailPayload = json_encode([
                             'id' => (int)$case['id'],
                             'animal' => $case['animal_type'],
                             'description' => $case['description'],
                             'location' => $locText,
+                            'needsGeocode' => $locMeta['needs_geocode'],
                             'lat' => (float)$case['latitude'],
                             'lon' => (float)$case['longitude'],
                             'image' => $case['image_path'],
@@ -442,10 +471,11 @@ $body_class = 'rescuer-dashboard-page';
                         }
                         $locShort = $locText;
                         if (function_exists('mb_strimwidth')) {
-                            $locShort = mb_strimwidth($locShort, 0, 80, '…');
-                        } elseif (strlen($locShort) > 80) {
-                            $locShort = substr($locShort, 0, 77) . '…';
+                            $locShort = mb_strimwidth($locShort, 0, 72, '…');
+                        } elseif (strlen($locShort) > 72) {
+                            $locShort = substr($locShort, 0, 69) . '…';
                         }
+                        $locDisplay = rescuer_location_label($locShort);
                         ?>
                         <div class="rescuer-card" style="border-top: 4px solid <?php echo $case['priority_level'] === 'urgent' ? '#dc2626' : '#ea580c'; ?>;">
                             <?php if (!empty($case['image_path'])): ?>
@@ -476,7 +506,14 @@ $body_class = 'rescuer-dashboard-page';
                                 </p>
                                 <div style="font-size:0.8rem;color:#64748b;margin-bottom:0.75rem;">
                                     <div><i class="fa-solid fa-clock"></i> <?php echo date('M j, Y H:i', strtotime($case['created_at'])); ?></div>
-                                    <div style="margin-top:0.25rem;"><i class="fa-solid fa-location-dot"></i> <?php echo htmlspecialchars($locShort); ?></div>
+                                    <div style="margin-top:0.25rem;"><i class="fa-solid fa-location-dot"></i>
+                                        <span class="js-rescue-location"
+                                              data-lat="<?php echo $locMeta['lat'] !== null ? htmlspecialchars((string)$locMeta['lat']) : ''; ?>"
+                                              data-lon="<?php echo $locMeta['lon'] !== null ? htmlspecialchars((string)$locMeta['lon']) : ''; ?>"
+                                              data-case-id="<?php echo (int)$locMeta['case_id']; ?>"
+                                              data-needs-geocode="<?php echo $locMeta['needs_geocode'] ? '1' : '0'; ?>"
+                                              data-skip-geocode="<?php echo $locMeta['needs_geocode'] ? '0' : '1'; ?>"><?php echo htmlspecialchars($locDisplay); ?></span>
+                                    </div>
                                 </div>
                                 <button type="button" class="btn btn-secondary" style="width:100%;margin-bottom:0.5rem;font-size:0.85rem;"
                                         onclick='rescuerOpenDetail(<?php echo $detailPayload; ?>)'>
@@ -625,9 +662,17 @@ $body_class = 'rescuer-dashboard-page';
                         </thead>
                         <tbody>
                             <?php foreach ($completed_cases as $c): ?>
+                                <?php $histLoc = rescuer_case_location_meta($c); ?>
                                 <tr>
                                     <td><?php echo htmlspecialchars($c['animal_type']); ?></td>
-                                    <td><?php echo htmlspecialchars($c['request_location'] ?? (($c['latitude'] ?? '') . ', ' . ($c['longitude'] ?? ''))); ?></td>
+                                    <td>
+                                        <span class="js-rescue-location"
+                                              data-lat="<?php echo $histLoc['lat'] !== null ? htmlspecialchars((string)$histLoc['lat']) : ''; ?>"
+                                              data-lon="<?php echo $histLoc['lon'] !== null ? htmlspecialchars((string)$histLoc['lon']) : ''; ?>"
+                                              data-case-id="<?php echo (int)$histLoc['case_id']; ?>"
+                                              data-needs-geocode="<?php echo $histLoc['needs_geocode'] ? '1' : '0'; ?>"
+                                              data-skip-geocode="<?php echo $histLoc['needs_geocode'] ? '0' : '1'; ?>"><?php echo htmlspecialchars(rescuer_location_label($histLoc['text'])); ?></span>
+                                    </td>
                                     <td><?php echo $c['resolved_at'] ? date('M j, Y H:i', strtotime($c['resolved_at'])) : '—'; ?></td>
                                     <td><span class="rescuer-badge badge-progress">Resolved</span></td>
                                 </tr>
@@ -763,6 +808,7 @@ $body_class = 'rescuer-dashboard-page';
     </div>
 </div>
 
+<script src="assets/js/rescuer-geocode.js"></script>
 <script>
 var rescuerDetailMap = null;
 function rescuerShow(sectionId, el) {
@@ -792,7 +838,15 @@ function rescuerOpenDetail(d) {
     var m = document.getElementById('rescuer-detail-modal');
     document.getElementById('rescuer-modal-title').textContent = (d.animal ? d.animal : 'Animal') + ' · #' + d.id;
     document.getElementById('rescuer-modal-desc').textContent = d.description || '';
-    document.getElementById('rescuer-modal-loc').textContent = d.location || '';
+    if (window.RescuerGeocode) {
+        window.RescuerGeocode.resolveForDetail(d, document.getElementById('rescuer-modal-loc'));
+    } else {
+        var locText = d.location || '';
+        document.getElementById('rescuer-modal-loc').textContent =
+            locText && String(locText).toLowerCase().indexOf('location:') === 0
+                ? locText
+                : 'Location: ' + (locText || (d.lat + ', ' + d.lon));
+    }
     document.getElementById('rescuer-modal-rep').textContent = (d.reporter || '') + (d.phone ? ' · ' + d.phone : '');
     document.getElementById('rescuer-modal-time').textContent = d.time || '';
     var img = document.getElementById('rescuer-modal-img');

@@ -1,6 +1,6 @@
 <?php
 require_once 'auth.php';
-require_login();
+require_role('rescuer');
 
 header('Content-Type: application/json');
 

@@ -7,13 +7,7 @@ require_once __DIR__ . '/../db_config.php';
 require_once __DIR__ . '/../Services/UserCaseTracking.php';
 require_once __DIR__ . '/../Repositories/RescueRepository.php';
 
-require_login();
-if (($_SESSION['role'] ?? '') !== 'user') {
-    http_response_code(403);
-    header('Content-Type: application/json');
-    echo json_encode(['ok' => false, 'error' => 'Forbidden']);
-    exit;
-}
+require_role('user');
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
