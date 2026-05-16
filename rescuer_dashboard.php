@@ -462,6 +462,8 @@ $body_class = 'rescuer-dashboard-page';
                             'reporter' => $case['reporter_name'],
                             'phone' => $case['reporter_phone'],
                             'time' => date('M j, Y H:i', strtotime($case['created_at'])),
+                            'rescuerLat' => $location_state['latitude'] !== null ? (float) $location_state['latitude'] : null,
+                            'rescuerLon' => $location_state['longitude'] !== null ? (float) $location_state['longitude'] : null,
                         ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
                         $descShort = $case['description'] ?? '';
                         if (function_exists('mb_strimwidth')) {
@@ -601,6 +603,7 @@ $body_class = 'rescuer-dashboard-page';
                 <div class="loc-share-card">
                     <span id="loc-status-pill" class="loc-status-pill <?php echo ($location_state['status'] ?? 'inactive') === 'active' ? 'active' : 'inactive'; ?>"><i class="fa-solid fa-circle"></i> <?php echo ($location_state['status'] ?? 'inactive') === 'active' ? 'Active' : 'Inactive'; ?></span>
                     <div class="loc-kv">
+                        <div style="grid-column:1/-1;"><span>Address</span><strong id="loc-address">—</strong></div>
                         <div><span>Latitude</span><strong id="loc-lat"><?php echo $location_state['latitude'] !== null ? htmlspecialchars((string)$location_state['latitude']) : '--'; ?></strong></div>
                         <div><span>Longitude</span><strong id="loc-lon"><?php echo $location_state['longitude'] !== null ? htmlspecialchars((string)$location_state['longitude']) : '--'; ?></strong></div>
                         <div><span>Last update</span><strong id="loc-updated"><?php echo !empty($location_state['updated_at']) ? htmlspecialchars((string)$location_state['updated_at']) : '--'; ?></strong></div>
@@ -798,13 +801,23 @@ $body_class = 'rescuer-dashboard-page';
         <dl style="margin:0.75rem 0;font-size:0.88rem;color:#475569;">
             <dt style="font-weight:700;color:#94a3b8;font-size:0.7rem;text-transform:uppercase;">Location</dt>
             <dd id="rescuer-modal-loc" style="margin:0.2rem 0 0.5rem;"></dd>
+            <dd id="rescuer-modal-distance" hidden style="margin:0 0 0.5rem;font-size:0.82rem;color:#4f46e5;"
+                data-rescuer-lat="<?php echo $location_state['latitude'] !== null ? htmlspecialchars((string)$location_state['latitude']) : ''; ?>"
+                data-rescuer-lon="<?php echo $location_state['longitude'] !== null ? htmlspecialchars((string)$location_state['longitude']) : ''; ?>"></dd>
             <dt style="font-weight:700;color:#94a3b8;font-size:0.7rem;text-transform:uppercase;">Reporter</dt>
             <dd id="rescuer-modal-rep" style="margin:0.2rem 0 0.5rem;"></dd>
             <dt style="font-weight:700;color:#94a3b8;font-size:0.7rem;text-transform:uppercase;">Reported</dt>
             <dd id="rescuer-modal-time" style="margin:0.2rem 0 0;"></dd>
         </dl>
         <div id="rescuer-detail-map"></div>
-        <a id="rescuer-modal-gmaps" href="#" target="_blank" rel="noopener" class="btn btn-secondary" style="margin-top:0.75rem;display:inline-block;">Open in Google Maps</a>
+        <p class="geo-map-legend-hint" id="rescuer-modal-map-legend" hidden>
+            <span><i class="geo-legend-dot geo-legend-dot--animal"></i> Animal reported</span>
+            <span><i class="geo-legend-dot geo-legend-dot--rescuer"></i> Your GPS</span>
+        </p>
+        <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.75rem;">
+            <button type="button" class="btn btn-secondary" id="rescuer-modal-view-map"><i class="fa-solid fa-map"></i> Focus map</button>
+            <a id="rescuer-modal-gmaps" href="#" target="_blank" rel="noopener" class="btn btn-secondary">Open in Google Maps</a>
+        </div>
     </div>
 </div>
 
@@ -853,15 +866,27 @@ function rescuerOpenDetail(d) {
     if (d.image && String(d.image).length) { img.src = d.image; img.style.display = 'block'; } else { img.style.display = 'none'; img.removeAttribute('src'); }
     document.getElementById('rescuer-modal-gmaps').href = 'https://maps.google.com/?q=' + encodeURIComponent(d.lat + ',' + d.lon);
     m.classList.add('is-open');
+    var distEl = document.getElementById('rescuer-modal-distance');
+    if (distEl) distEl.hidden = true;
+    var legendHint = document.getElementById('rescuer-modal-map-legend');
+    if (legendHint) legendHint.hidden = true;
+
     setTimeout(function () {
-        var el = document.getElementById('rescuer-detail-map');
-        if (!el || typeof L === 'undefined') return;
-        if (rescuerDetailMap) { rescuerDetailMap.remove(); rescuerDetailMap = null; }
-        rescuerDetailMap = L.map('rescuer-detail-map').setView([d.lat, d.lon], 15);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19,
-            attribution: '&copy; OpenStreetMap' }).addTo(rescuerDetailMap);
-        L.marker([d.lat, d.lon]).addTo(rescuerDetailMap);
-        rescuerDetailMap.invalidateSize();
+        if (window.LocationGeocode && LocationGeocode.initRescuerDetailMap) {
+            rescuerDetailMap = LocationGeocode.initRescuerDetailMap('rescuer-detail-map', d);
+            if (legendHint && d.rescuerLat != null && d.rescuerLon != null) {
+                legendHint.hidden = false;
+            }
+        } else {
+            var el = document.getElementById('rescuer-detail-map');
+            if (!el || typeof L === 'undefined') return;
+            if (rescuerDetailMap) { rescuerDetailMap.remove(); rescuerDetailMap = null; }
+            rescuerDetailMap = L.map('rescuer-detail-map').setView([d.lat, d.lon], 15);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19,
+                attribution: '&copy; OpenStreetMap' }).addTo(rescuerDetailMap);
+            L.marker([d.lat, d.lon]).addTo(rescuerDetailMap);
+            rescuerDetailMap.invalidateSize();
+        }
     }, 100);
 }
 function rescuerCloseDetail() {
@@ -1012,6 +1037,12 @@ window.addEventListener('load', function () {
                 if (latBox) latBox.textContent = lat.toFixed(6);
                 if (lonBox) lonBox.textContent = lon.toFixed(6);
                 if (updatedBox) updatedBox.textContent = new Date().toLocaleTimeString();
+                if (window.LocationGeocode) {
+                    var addrBox = document.getElementById('loc-address');
+                    LocationGeocode.fetchAddress(lat, lon).then(function (addr) {
+                        if (addrBox) addrBox.textContent = addr;
+                    });
+                }
                 updateMap(lat, lon);
                 setSharingUI(true);
                 setLog('Location shared successfully (' + lat.toFixed(4) + ', ' + lon.toFixed(4) + ')', false);
@@ -1062,6 +1093,30 @@ window.addEventListener('load', function () {
     if (startBtn) startBtn.addEventListener('click', startSharing);
     if (stopBtn) stopBtn.addEventListener('click', stopSharing);
     setSharingUI(statusPill && statusPill.classList.contains('active'));
+
+    var modalViewMapBtn = document.getElementById('rescuer-modal-view-map');
+    if (modalViewMapBtn) {
+        modalViewMapBtn.addEventListener('click', function () {
+            var mapEl = document.getElementById('rescuer-detail-map');
+            if (mapEl && mapEl.scrollIntoView) {
+                mapEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+            if (rescuerDetailMap && rescuerDetailMap.invalidateSize) {
+                setTimeout(function () { rescuerDetailMap.invalidateSize(); }, 200);
+            }
+        });
+    }
+
+    if (window.LocationGeocode && latBox && lonBox) {
+        var initLat = parseFloat(latBox.textContent);
+        var initLon = parseFloat(lonBox.textContent);
+        if (!isNaN(initLat) && !isNaN(initLon)) {
+            LocationGeocode.fetchAddress(initLat, initLon).then(function (addr) {
+                var ab = document.getElementById('loc-address');
+                if (ab) ab.textContent = addr;
+            });
+        }
+    }
 
     var panel = document.getElementById('rescuer-notify-panel-static');
     var markReadBtn = document.getElementById('rescuer-mark-read-btn');

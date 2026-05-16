@@ -19,18 +19,21 @@ function is_role_logged_in(string $role): bool
 
 function require_login(): void
 {
+    global $pdo;
+
     if (defined('ARS_AUTH_ROLE')) {
         require_role(ARS_AUTH_ROLE);
         return;
     }
 
+    $requested = SessionManager::getRequestedContext();
+    if ($requested !== null && SessionManager::activateRole($requested, $pdo instanceof PDO ? $pdo : null)) {
+        return;
+    }
+
     if (SessionManager::hasAnyRole()) {
-        $ctx = SessionManager::getCurrentContext();
-        if ($ctx !== null && SessionManager::activateRole($ctx, $GLOBALS['pdo'] ?? null)) {
-            return;
-        }
         foreach (SessionManager::getActiveRoles() as $role) {
-            if (SessionManager::activateRole($role, $GLOBALS['pdo'] ?? null)) {
+            if (SessionManager::activateRole($role, $pdo instanceof PDO ? $pdo : null)) {
                 return;
             }
         }
@@ -47,9 +50,13 @@ function require_role(string $role): void
     global $pdo;
     $role = SessionManager::normalizeRole($role);
 
+    if (!SessionManager::isRoleLoggedIn($role)) {
+        header('Location: login.php?intent=' . urlencode($role));
+        exit;
+    }
+
     if (!SessionManager::activateRole($role, $pdo instanceof PDO ? $pdo : null)) {
-        $q = 'intent=' . urlencode($role);
-        header('Location: login.php?' . $q);
+        header('Location: login.php?intent=' . urlencode($role));
         exit;
     }
 

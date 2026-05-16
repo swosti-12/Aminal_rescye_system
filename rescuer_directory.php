@@ -532,9 +532,19 @@ require_once __DIR__ . '/includes/header.php';
             <span class="meta-value"><?php echo htmlspecialchars($caseData['priority_level']); ?></span>
         </div>
         <?php if (!empty($caseData['latitude'])): ?>
-        <div class="meta-item">
+        <div class="meta-item meta-item--wide">
             <span class="meta-label">Location</span>
-            <span class="meta-value"><?php echo htmlspecialchars($caseData['latitude']); ?>, <?php echo htmlspecialchars($caseData['longitude']); ?></span>
+            <span class="meta-value js-rescue-location"
+                  data-lat="<?php echo htmlspecialchars((string)$caseData['latitude']); ?>"
+                  data-lon="<?php echo htmlspecialchars((string)$caseData['longitude']); ?>"
+                  data-case-id="<?php echo (int)($caseData['id'] ?? 0); ?>"
+                  data-needs-geocode="1"
+                  data-skip-geocode="0"><?php echo htmlspecialchars($caseData['latitude']); ?>, <?php echo htmlspecialchars($caseData['longitude']); ?></span>
+            <button type="button" class="btn btn-secondary btn-sm js-rd-view-map"
+                    data-lat="<?php echo htmlspecialchars((string)$caseData['latitude']); ?>"
+                    data-lon="<?php echo htmlspecialchars((string)$caseData['longitude']); ?>"
+                    data-title="Case #<?php echo (int)($caseData['id'] ?? 0); ?>">View on Map</button>
+            <div id="rd-case-map" class="geo-map-mini" hidden></div>
         </div>
         <?php endif; ?>
     </div>
@@ -597,8 +607,18 @@ require_once __DIR__ . '/includes/header.php';
     <?php endif; ?>
 </div>
 
+<script src="assets/js/rescuer-geocode.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.js-rd-view-map').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (!window.LocationGeocode) return;
+            var lat = parseFloat(btn.getAttribute('data-lat') || '');
+            var lon = parseFloat(btn.getAttribute('data-lon') || '');
+            if (isNaN(lat) || isNaN(lon)) return;
+            LocationGeocode.openInlineMap('rd-case-map', lat, lon, btn.getAttribute('data-title') || 'Case location');
+        });
+    });
     // Disable button on submit to prevent double-click
     document.querySelectorAll('.rd-assign-form').forEach(function (form) {
         form.addEventListener('submit', function () {

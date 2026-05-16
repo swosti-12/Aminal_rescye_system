@@ -487,6 +487,10 @@
     color: var(--text-muted);
 }
 
+.ud-case__geo {
+    margin-top: 0.5rem;
+}
+
 .ud-hint {
     font-size: 0.82rem;
     color: var(--text-muted);

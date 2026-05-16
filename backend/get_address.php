@@ -1,64 +1,39 @@
 <?php
+
+declare(strict_types=1);
+
 /**
- * JSON API: reverse geocode latitude/longitude to a human-readable address.
- * GET ?lat=...&lng=...&case_id=... (case_id optional, enables MySQL cache)
+ * JSON reverse-geocoding proxy (Nominatim via GeocodingService).
+ * GET: lat, lon — optional case_id to cache address on rescue_cases.
  */
+require_once __DIR__ . '/auth.php';
+require_login();
+
 header('Content-Type: application/json; charset=utf-8');
 
-require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/db_config.php';
 require_once __DIR__ . '/Services/GeocodingService.php';
 
-require_any_role(['rescuer', 'admin']);
+$lat = isset($_GET['lat']) ? filter_var($_GET['lat'], FILTER_VALIDATE_FLOAT) : false;
+$lon = isset($_GET['lon']) ? filter_var($_GET['lon'], FILTER_VALIDATE_FLOAT) : false;
+$caseId = isset($_GET['case_id']) ? filter_var($_GET['case_id'], FILTER_VALIDATE_INT) : 0;
 
-$lat = filter_var($_GET['lat'] ?? $_GET['latitude'] ?? '', FILTER_VALIDATE_FLOAT);
-$lng = filter_var($_GET['lng'] ?? $_GET['lon'] ?? $_GET['longitude'] ?? '', FILTER_VALIDATE_FLOAT);
-$caseId = filter_var($_GET['case_id'] ?? '', FILTER_VALIDATE_INT);
-$caseId = $caseId !== false && $caseId > 0 ? (int)$caseId : null;
-
-if ($lat === false || $lng === false) {
+if ($lat === false || $lon === false) {
     http_response_code(400);
-    echo json_encode(['ok' => false, 'error' => 'Invalid coordinates']);
+    echo json_encode(['ok' => false, 'error' => 'Invalid latitude or longitude']);
     exit;
 }
 
-$lat = (float)$lat;
-$lng = (float)$lng;
+$address = GeocodingService::reverseGeocode((float) $lat, (float) $lon);
 
-if (!GeocodingService::isValidCoordinates($lat, $lng)) {
-    http_response_code(400);
-    echo json_encode(['ok' => false, 'error' => 'Coordinates out of range']);
-    exit;
-}
-
-$cachedBefore = null;
-if ($caseId !== null) {
-    try {
-        $st = $pdo->prepare(
-            'SELECT address FROM rescue_cases WHERE id = ? AND address IS NOT NULL AND address != \'\' LIMIT 1'
-        );
-        $st->execute([$caseId]);
-        $row = $st->fetch();
-        if ($row && !empty($row['address'])) {
-            $cachedBefore = trim((string)$row['address']);
-        }
-    } catch (Throwable $e) {
-    }
-}
-
-$address = GeocodingService::reverseGeocode($pdo, $lat, $lng, $caseId);
-
-if ($address === null) {
-    echo json_encode([
-        'ok' => false,
-        'error' => 'Geocoding unavailable',
-        'fallback' => GeocodingService::coordinateFallback($lat, $lng),
-    ]);
-    exit;
+if ($address !== null && $caseId > 0) {
+    GeocodingService::saveCaseAddress($pdo, $caseId, $address);
 }
 
 echo json_encode([
-    'ok' => true,
+    'ok' => $address !== null,
     'address' => $address,
-    'cached' => $cachedBefore !== null,
-    'fallback' => GeocodingService::coordinateFallback($lat, $lng),
-]);
+    'latitude' => (float) $lat,
+    'longitude' => (float) $lon,
+    'fallback' => GeocodingService::coordinateFallback((float) $lat, (float) $lon),
+], JSON_UNESCAPED_UNICODE);

@@ -4,7 +4,24 @@ declare(strict_types=1);
 
 final class RescueRepository
 {
+    private ?bool $hasAddressColumn = null;
+
     public function __construct(private PDO $pdo) {}
+
+    public function hasAddressColumn(): bool
+    {
+        if ($this->hasAddressColumn !== null) {
+            return $this->hasAddressColumn;
+        }
+        try {
+            $st = $this->pdo->query("SHOW COLUMNS FROM rescue_cases LIKE 'address'");
+            $this->hasAddressColumn = (bool) $st->fetch();
+        } catch (Throwable $e) {
+            $this->hasAddressColumn = false;
+        }
+
+        return $this->hasAddressColumn;
+    }
 
     /**
      * @return array<int, array<string, mixed>>
@@ -140,20 +157,40 @@ final class RescueRepository
      */
     public function insertCase(array $case): int
     {
-        $sql = 'INSERT INTO rescue_cases (reporter_id, animal_type, description, image_path, latitude, longitude, detected_injury_severity, priority_level, assigned_rescuer_id, status) VALUES (?,?,?,?,?,?,?,?,?,?)';
-        $st = $this->pdo->prepare($sql);
-        $st->execute([
-            $case['reporter_id'],
-            $case['animal_type'],
-            $case['description'],
-            $case['image_path'],
-            $case['lat'],
-            $case['lon'],
-            $case['severity'],
-            $case['priority'],
-            $case['rescuer_id'],
-            $case['status'],
-        ]);
+        $address = isset($case['address']) ? trim((string) $case['address']) : '';
+        if ($this->hasAddressColumn() && $address !== '') {
+            $sql = 'INSERT INTO rescue_cases (reporter_id, animal_type, description, image_path, latitude, longitude, address, detected_injury_severity, priority_level, assigned_rescuer_id, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)';
+            $st = $this->pdo->prepare($sql);
+            $st->execute([
+                $case['reporter_id'],
+                $case['animal_type'],
+                $case['description'],
+                $case['image_path'],
+                $case['lat'],
+                $case['lon'],
+                $address,
+                $case['severity'],
+                $case['priority'],
+                $case['rescuer_id'],
+                $case['status'],
+            ]);
+        } else {
+            $sql = 'INSERT INTO rescue_cases (reporter_id, animal_type, description, image_path, latitude, longitude, detected_injury_severity, priority_level, assigned_rescuer_id, status) VALUES (?,?,?,?,?,?,?,?,?,?)';
+            $st = $this->pdo->prepare($sql);
+            $st->execute([
+                $case['reporter_id'],
+                $case['animal_type'],
+                $case['description'],
+                $case['image_path'],
+                $case['lat'],
+                $case['lon'],
+                $case['severity'],
+                $case['priority'],
+                $case['rescuer_id'],
+                $case['status'],
+            ]);
+        }
+
         return (int) $this->pdo->lastInsertId();
     }
 

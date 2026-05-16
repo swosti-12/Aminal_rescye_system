@@ -250,6 +250,15 @@ window.__USER_FLASH__ = <?php echo json_encode($flash ?? ['message' => '', 'type
                             $track = UserCaseTracking::fromRow($report);
                             $badge = UserCaseTracking::priorityBadge($report);
                             $rid = (int) $report['id'];
+                            $caseLat = isset($report['latitude']) ? (float) $report['latitude'] : null;
+                            $caseLon = isset($report['longitude']) ? (float) $report['longitude'] : null;
+                            $caseAddr = trim((string) ($report['address'] ?? ''));
+                            $caseNeedsGeocode = $caseAddr === '' && $caseLat !== null && $caseLon !== null;
+                            $caseLocText = $caseAddr !== ''
+                                ? $caseAddr
+                                : ($caseLat !== null && $caseLon !== null
+                                    ? $caseLat . ', ' . $caseLon
+                                    : '—');
                             ?>
                             <article class="ud-case glass-panel" data-case-id="<?php echo $rid; ?>">
                                 <header class="ud-case__head">
@@ -262,6 +271,25 @@ window.__USER_FLASH__ = <?php echo json_encode($flash ?? ['message' => '', 'type
                                     <span class="ud-prio-badge <?php echo htmlspecialchars($badge['class'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($badge['label'], ENT_QUOTES, 'UTF-8'); ?></span>
                                 </header>
                                 <p class="ud-case__desc"><?php echo htmlspecialchars((string) $report['description'], ENT_QUOTES, 'UTF-8'); ?></p>
+
+                                <?php if ($caseLat !== null && $caseLon !== null): ?>
+                                <div class="ud-case__geo geo-location-block">
+                                    <p class="geo-location-block__label"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> Reported location</p>
+                                    <p class="js-rescue-location geo-location-block__addr"
+                                       data-lat="<?php echo htmlspecialchars((string) $caseLat, ENT_QUOTES, 'UTF-8'); ?>"
+                                       data-lon="<?php echo htmlspecialchars((string) $caseLon, ENT_QUOTES, 'UTF-8'); ?>"
+                                       data-case-id="<?php echo $rid; ?>"
+                                       data-needs-geocode="<?php echo $caseNeedsGeocode ? '1' : '0'; ?>"
+                                       data-skip-geocode="<?php echo $caseNeedsGeocode ? '0' : '1'; ?>"><?php echo htmlspecialchars($caseLocText, ENT_QUOTES, 'UTF-8'); ?></p>
+                                    <button type="button" class="btn btn-secondary btn-sm js-ud-view-map"
+                                            data-lat="<?php echo htmlspecialchars((string) $caseLat, ENT_QUOTES, 'UTF-8'); ?>"
+                                            data-lon="<?php echo htmlspecialchars((string) $caseLon, ENT_QUOTES, 'UTF-8'); ?>"
+                                            data-map-id="ud-case-map-<?php echo $rid; ?>"
+                                            data-title="Case #<?php echo $rid; ?>">View on Map</button>
+                                    <div id="ud-case-map-<?php echo $rid; ?>" class="geo-map-mini" hidden></div>
+                                </div>
+                                <?php endif; ?>
+
 
                                 <?php if ($track['variant'] === 'rejected'): ?>
                                     <div class="ud-timeline ud-timeline--rejected" role="group" aria-label="Request outcome">

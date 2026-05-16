@@ -58,6 +58,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <div class="glass-panel" style="width: 100%; max-width: 450px; padding: 3rem;">
         <h2 class="text-center" style="margin-bottom: 2rem;">Welcome Back</h2>
 
+        <p class="text-center" style="font-size:0.82rem;color:#64748b;margin:-1rem 0 1.25rem;">
+            Multi-role demo: open each dashboard in a <strong>separate tab</strong>. Logging in here adds a role without signing others out.
+        </p>
+        <div style="display:flex;flex-wrap:wrap;gap:0.4rem;justify-content:center;margin-bottom:1.25rem;">
+            <a href="login.php?intent=admin" class="btn btn-secondary" style="font-size:0.78rem;padding:0.35rem 0.65rem;">Admin login</a>
+            <a href="login.php?intent=rescuer" class="btn btn-secondary" style="font-size:0.78rem;padding:0.35rem 0.65rem;">Rescuer login</a>
+            <a href="login.php?intent=user" class="btn btn-secondary" style="font-size:0.78rem;padding:0.35rem 0.65rem;">User login</a>
+        </div>
+
+        <?php if ($loginIntent !== ''): ?>
+            <p style="text-align:center;font-size:0.85rem;color:#4338ca;margin-bottom:1rem;">
+                Signing in as: <strong><?php echo htmlspecialchars(SessionManager::getSessionLabel($loginIntent)); ?></strong>
+            </p>
+        <?php endif; ?>
+
         <?php if ($activeRoles !== []): ?>
             <div style="background: rgba(224, 231, 255, 0.95); color: #3730a3; padding: 0.85rem 1rem; border-radius: 8px; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.5;">
                 <strong><i class="fa-solid fa-layer-group"></i> Demo mode:</strong>

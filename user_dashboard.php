@@ -35,5 +35,5 @@ $extra_styles = ['assets/css/user-dashboard.css'];
 require_once __DIR__ . '/includes/header.php';
 require_once __DIR__ . '/views/user/dashboard.php';
 
-$extra_scripts = ['assets/js/user-dashboard.js'];
+$extra_scripts = ['assets/js/rescuer-geocode.js', 'assets/js/user-dashboard.js'];
 require_once __DIR__ . '/includes/footer.php';

@@ -1,147 +1,113 @@
 <?php
+
+declare(strict_types=1);
+
 /**
- * Reverse geocoding via OpenStreetMap Nominatim with optional rescue_cases.address cache.
+ * Reverse geocoding via OpenStreetMap Nominatim (free, no API key).
+ * Respects Nominatim usage policy: max ~1 request/second, identifiable User-Agent.
  */
-class GeocodingService
+final class GeocodingService
 {
     private const NOMINATIM_REVERSE = 'https://nominatim.openstreetmap.org/reverse';
-    private const USER_AGENT = 'AnimalRescueSystem/1.0 (rescuer-dashboard)';
+    private const USER_AGENT = 'RescueNet-AnimalRescue/1.0 (localhost; educational project)';
 
-    public static function isValidCoordinates(float $lat, float $lon): bool
-    {
-        return $lat >= -90 && $lat <= 90 && $lon >= -180 && $lon <= 180;
-    }
+    /** @var array<string, string> */
+    private static array $memoryCache = [];
 
     public static function coordinateFallback(float $lat, float $lon): string
     {
-        return sprintf('%.4f, %.4f', $lat, $lon);
+        return sprintf('%.5f, %.5f', $lat, $lon);
     }
 
-    /**
-     * @return string|null Human-readable address or null on failure
-     */
-    public static function reverseGeocode(PDO $pdo, float $lat, float $lon, ?int $caseId = null): ?string
+    public static function reverseGeocode(float $lat, float $lon): ?string
     {
-        if (!self::isValidCoordinates($lat, $lon)) {
+        if ($lat < -90 || $lat > 90 || $lon < -180 || $lon > 180) {
             return null;
         }
 
-        if ($caseId !== null) {
-            $cached = self::readCachedAddress($pdo, $caseId);
-            if ($cached !== null) {
-                return $cached;
-            }
+        $key = round($lat, 5) . ',' . round($lon, 5);
+        if (isset(self::$memoryCache[$key])) {
+            return self::$memoryCache[$key];
         }
 
-        $address = self::fetchFromNominatim($lat, $lon);
-        if ($address !== null && $caseId !== null) {
-            self::writeCachedAddress($pdo, $caseId, $address);
-        }
+        self::throttleNominatim();
 
-        return $address;
-    }
-
-    private static function readCachedAddress(PDO $pdo, int $caseId): ?string
-    {
-        try {
-            $stmt = $pdo->prepare(
-                'SELECT address FROM rescue_cases WHERE id = ? AND address IS NOT NULL AND address != \'\' LIMIT 1'
-            );
-            $stmt->execute([$caseId]);
-            $row = $stmt->fetch();
-            if ($row && !empty($row['address'])) {
-                return trim((string)$row['address']);
-            }
-        } catch (Throwable $e) {
-            // address column may not exist until migration is applied
-        }
-        return null;
-    }
-
-    private static function writeCachedAddress(PDO $pdo, int $caseId, string $address): void
-    {
-        $address = trim($address);
-        if ($address === '') {
-            return;
-        }
-        try {
-            $pdo->prepare('UPDATE rescue_cases SET address = ? WHERE id = ?')
-                ->execute([$address, $caseId]);
-        } catch (Throwable $e) {
-            // Column missing or DB error — geocoding still works without cache
-        }
-    }
-
-    private static function fetchFromNominatim(float $lat, float $lon): ?string
-    {
         $url = self::NOMINATIM_REVERSE . '?' . http_build_query([
-            'lat' => round($lat, 6),
-            'lon' => round($lon, 6),
+            'lat' => $lat,
+            'lon' => $lon,
             'format' => 'json',
-            'addressdetails' => '1',
+            'addressdetails' => 1,
+            'zoom' => 18,
         ]);
 
-        $ch = curl_init($url);
-        if ($ch === false) {
-            return null;
-        }
-
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 10,
-            CURLOPT_CONNECTTIMEOUT => 5,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_HTTPHEADER => [
-                'Accept: application/json',
-                'User-Agent: ' . self::USER_AGENT,
+        $ctx = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'header' => 'User-Agent: ' . self::USER_AGENT . "\r\nAccept: application/json\r\n",
+                'timeout' => 10,
             ],
         ]);
 
-        $body = curl_exec($ch);
-        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($body === false || $httpCode < 200 || $httpCode >= 300) {
+        $raw = @file_get_contents($url, false, $ctx);
+        if ($raw === false) {
             return null;
         }
 
-        $data = json_decode($body, true);
+        $data = json_decode($raw, true);
         if (!is_array($data)) {
             return null;
         }
 
-        if (!empty($data['display_name']) && is_string($data['display_name'])) {
-            return trim($data['display_name']);
-        }
-
-        if (!empty($data['address']) && is_array($data['address'])) {
-            return self::formatAddressParts($data['address']);
-        }
-
-        return null;
-    }
-
-    /**
-     * @param array<string, mixed> $parts
-     */
-    private static function formatAddressParts(array $parts): ?string
-    {
-        $keys = [
-            'house_number', 'road', 'neighbourhood', 'suburb',
-            'city', 'town', 'village', 'county', 'state', 'postcode', 'country',
-        ];
-        $segments = [];
-        foreach ($keys as $key) {
-            if (!empty($parts[$key]) && is_string($parts[$key])) {
-                $val = trim($parts[$key]);
-                if ($val !== '' && !in_array($val, $segments, true)) {
-                    $segments[] = $val;
-                }
-            }
-        }
-        if ($segments === []) {
+        $name = trim((string) ($data['display_name'] ?? ''));
+        if ($name === '') {
             return null;
         }
-        return implode(', ', $segments);
+
+        self::$memoryCache[$key] = $name;
+
+        return $name;
+    }
+
+    private static function throttleNominatim(): void
+    {
+        $dir = __DIR__ . '/../cache';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0777, true);
+        }
+        $file = $dir . '/nominatim_throttle.txt';
+        $last = is_file($file) ? (float) file_get_contents($file) : 0.0;
+        $now = microtime(true);
+        $wait = 1.05 - ($now - $last);
+        if ($wait > 0) {
+            usleep((int) ($wait * 1_000_000));
+        }
+        file_put_contents($file, (string) microtime(true));
+    }
+
+    public static function hasAddressColumn(PDO $pdo): bool
+    {
+        static $cached = null;
+        if ($cached !== null) {
+            return $cached;
+        }
+        try {
+            $st = $pdo->query("SHOW COLUMNS FROM rescue_cases LIKE 'address'");
+            $cached = (bool) $st->fetch();
+        } catch (Throwable $e) {
+            $cached = false;
+        }
+
+        return $cached;
+    }
+
+    public static function saveCaseAddress(PDO $pdo, int $caseId, string $address): void
+    {
+        $address = trim($address);
+        if ($address === '' || !self::hasAddressColumn($pdo)) {
+            return;
+        }
+        $pdo->prepare(
+            'UPDATE rescue_cases SET address = ? WHERE id = ? AND (address IS NULL OR TRIM(address) = \'\')'
+        )->execute([$address, $caseId]);
     }
 }

@@ -84,8 +84,18 @@ if (isset($pdo)) {
                             Logged in as: <?php echo htmlspecialchars(SessionManager::getSessionLabel($ars_context)); ?>
                         </span>
                         <?php if (count($ars_slots) > 1): ?>
-                            <span style="font-size:0.68rem;color:#64748b;max-width:140px;line-height:1.3;" title="Informational only">
-                                +<?php echo count($ars_slots) - 1; ?> other role<?php echo count($ars_slots) > 2 ? 's' : ''; ?> active
+                            <?php
+                            $otherLinks = [];
+                            foreach ($ars_slots as $slotRole => $_slot) {
+                                if ($slotRole === $ars_context) {
+                                    continue;
+                                }
+                                $href = $slotRole === 'admin' ? 'admin_dashboard.php' : ($slotRole === 'rescuer' ? 'rescuer_dashboard.php' : 'user_dashboard.php');
+                                $otherLinks[] = '<a href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '" style="color:#4338ca;">' . htmlspecialchars(SessionManager::getSessionLabel($slotRole)) . '</a>';
+                            }
+                            ?>
+                            <span style="font-size:0.68rem;color:#64748b;max-width:200px;line-height:1.35;" title="Open another role in a new browser tab">
+                                Also open: <?php echo implode(' · ', $otherLinks); ?>
                             </span>
                         <?php endif; ?>
                         <?php if ($ars_context === 'admin'): ?>

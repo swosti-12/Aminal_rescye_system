@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../api_service.php';
+require_once __DIR__ . '/GeocodingService.php';
 
 final class RescueSubmissionService
 {
@@ -43,6 +44,11 @@ final class RescueSubmissionService
         if ($lat === null || $lon === null) {
             return ['success' => false, 'message' => 'Please set location on the map or use “Use my location”.', 'type' => 'error'];
         }
+
+        $geocodedAddress = GeocodingService::reverseGeocode($lat, $lon);
+        $resolvedAddress = $locationText !== ''
+            ? $locationText
+            : ($geocodedAddress ?? GeocodingService::coordinateFallback($lat, $lon));
 
         $upload = $this->saveUploadedImage($files['image'] ?? null);
         if ($upload['error']) {
@@ -123,13 +129,14 @@ final class RescueSubmissionService
             'image_path' => $imagePath,
             'lat' => $lat,
             'lon' => $lon,
+            'address' => $geocodedAddress ?? '',
             'severity' => $severity,
             'priority' => $priorityLevel,
             'rescuer_id' => $assignedId,
             'status' => $status,
         ]);
 
-        $humanLocation = $locationText !== '' ? $locationText : ($lat . ', ' . $lon);
+        $humanLocation = $resolvedAddress;
         $this->rescues->insertRescueRequest([
             'user_id' => $userId,
             'case_id' => $caseId,
@@ -190,6 +197,11 @@ final class RescueSubmissionService
         float $animalConf,
         string $userMessage
     ): array {
+        $geocodedAddress = GeocodingService::reverseGeocode($lat, $lon);
+        $resolvedAddress = $locationText !== ''
+            ? $locationText
+            : ($geocodedAddress ?? GeocodingService::coordinateFallback($lat, $lon));
+
         $caseId = $this->rescues->insertCase([
             'reporter_id' => $userId,
             'animal_type' => $animalType,
@@ -197,13 +209,14 @@ final class RescueSubmissionService
             'image_path' => $imagePath,
             'lat' => $lat,
             'lon' => $lon,
+            'address' => $geocodedAddress ?? '',
             'severity' => 'low',
             'priority' => $priorityLevel,
             'rescuer_id' => null,
             'status' => 'rejected',
         ]);
 
-        $humanLocation = $locationText !== '' ? $locationText : ($lat . ', ' . $lon);
+        $humanLocation = $resolvedAddress;
         $img = $imagePath ?? '';
         $this->rescues->insertRescueRequest([
             'user_id' => $userId,

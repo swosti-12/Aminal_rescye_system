@@ -157,8 +157,19 @@ require_once __DIR__ . '/includes/header.php';
                 <div class="request-meta">
                     <div class="request-box"><span>User</span><?php echo htmlspecialchars($requestData['user_name']); ?></div>
                     <div class="request-box"><span>Status</span><?php echo htmlspecialchars($requestData['status']); ?></div>
-                    <div class="request-box"><span>Latitude</span><?php echo htmlspecialchars((string)$requestData['latitude']); ?></div>
-                    <div class="request-box"><span>Longitude</span><?php echo htmlspecialchars((string)$requestData['longitude']); ?></div>
+                    <div class="request-box request-box--wide">
+                        <span>Location</span>
+                        <p class="js-rescue-location geo-location-block__addr"
+                           data-lat="<?php echo htmlspecialchars((string)$requestData['latitude']); ?>"
+                           data-lon="<?php echo htmlspecialchars((string)$requestData['longitude']); ?>"
+                           data-needs-geocode="1"
+                           data-skip-geocode="0"><?php echo htmlspecialchars((string)$requestData['latitude'] . ', ' . (string)$requestData['longitude']); ?></p>
+                        <button type="button" class="btn btn-secondary btn-sm js-manage-view-map"
+                                data-lat="<?php echo htmlspecialchars((string)$requestData['latitude']); ?>"
+                                data-lon="<?php echo htmlspecialchars((string)$requestData['longitude']); ?>"
+                                data-title="Request #<?php echo (int)$requestData['id']; ?>">View on Map</button>
+                        <div id="manage-request-map" class="geo-map-mini" hidden></div>
+                    </div>
                 </div>
             </article>
 
@@ -224,6 +235,7 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
+<script src="assets/js/rescuer-geocode.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.assign-form').forEach(function (form) {
@@ -232,6 +244,15 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!btn || btn.disabled) return;
             btn.disabled = true;
             btn.textContent = 'Assigning...';
+        });
+    });
+    document.querySelectorAll('.js-manage-view-map').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (!window.LocationGeocode) return;
+            var lat = parseFloat(btn.getAttribute('data-lat') || '');
+            var lon = parseFloat(btn.getAttribute('data-lon') || '');
+            if (isNaN(lat) || isNaN(lon)) return;
+            LocationGeocode.openInlineMap('manage-request-map', lat, lon, btn.getAttribute('data-title') || 'Rescue request');
         });
     });
 });

@@ -31,10 +31,26 @@
                 <ul class="site-footer__list">
                     <li><a href="login.php">Login</a></li>
                     <li><a href="register.php">Register</a></li>
-                    <?php if (isset($_SESSION['user_id'])): ?>
-                        <?php if ($_SESSION['role'] === 'admin'): ?>
+                    <?php
+                    if (!class_exists('SessionManager', false)) {
+                        require_once __DIR__ . '/../backend/SessionManager.php';
+                        SessionManager::bootstrap();
+                    }
+                    $footerSlots = SessionManager::getActiveRoles();
+                    ?>
+                    <?php if ($footerSlots !== []): ?>
+                        <?php foreach ($footerSlots as $footerRole): ?>
+                            <li>
+                                <a href="<?php
+                                    echo $footerRole === 'admin' ? 'admin_dashboard.php' : ($footerRole === 'rescuer' ? 'rescuer_dashboard.php' : 'user_dashboard.php');
+                                ?>"><?php echo htmlspecialchars(SessionManager::getSessionLabel($footerRole)); ?> Dashboard</a>
+                            </li>
+                        <?php endforeach; ?>
+                        <li><a href="logout.php?role=all">Logout all roles</a></li>
+                    <?php elseif (isset($_SESSION['user_id'])): ?>
+                        <?php if (($_SESSION['role'] ?? '') === 'admin'): ?>
                             <li><a href="admin_dashboard.php">Admin Dashboard</a></li>
-                        <?php elseif ($_SESSION['role'] === 'rescuer'): ?>
+                        <?php elseif (($_SESSION['role'] ?? '') === 'rescuer'): ?>
                             <li><a href="rescuer_dashboard.php">Rescuer Dashboard</a></li>
                         <?php else: ?>
                             <li><a href="user_dashboard.php">User Dashboard</a></li>
@@ -81,6 +97,7 @@
     </button>
 
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="assets/js/ars-session.js"></script>
     <script src="assets/js/main.js"></script>
     <?php if (isset($extra_scripts) && is_array($extra_scripts) && $extra_scripts !== []): ?>
         <?php foreach ($extra_scripts as $_js_src): ?>

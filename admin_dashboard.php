@@ -319,6 +319,7 @@ try {
     $ai_requests = $pdo->query("
         SELECT r.*, u.name AS reporter_name, u.email AS reporter_email,
                c.animal_type, c.status AS case_status, c.id AS linked_case_id,
+               c.latitude AS case_latitude, c.longitude AS case_longitude, c.address AS case_address,
                resc.name AS rescuer_name
         FROM rescue_requests r
         JOIN users u ON r.user_id = u.id
@@ -475,6 +476,12 @@ $body_class = 'admin-dashboard-page';
                         $lowC = ((float)$r['confidence']) < 0.7;
                         $src = ($r['decision_source'] ?? 'ai') === 'admin' ? 'admin' : 'ai';
                         $cid = !empty($r['linked_case_id']) ? (int)$r['linked_case_id'] : (!empty($r['case_id']) ? (int)$r['case_id'] : null);
+                        $caseLat = isset($r['case_latitude']) && $r['case_latitude'] !== null && $r['case_latitude'] !== '' ? (float) $r['case_latitude'] : null;
+                        $caseLon = isset($r['case_longitude']) && $r['case_longitude'] !== null && $r['case_longitude'] !== '' ? (float) $r['case_longitude'] : null;
+                        $caseAddr = trim((string) ($r['case_address'] ?? ''));
+                        $locNotes = trim((string) ($r['location'] ?? ''));
+                        $adminLocText = $caseAddr !== '' ? $caseAddr : ($locNotes !== '' ? $locNotes : ($caseLat !== null ? $caseLat . ', ' . $caseLon : '—'));
+                        $adminNeedsGeocode = $caseLat !== null && $caseLon !== null && $caseAddr === '' && !preg_match('/^-?\d+\.?\d*,\s*-?\d+\.?\d*$/', $locNotes);
                         ?>
                         <article class="admin-request-card">
                             <div class="admin-request-card__head">
@@ -507,16 +514,36 @@ $body_class = 'admin-dashboard-page';
                                         <dt>System decision</dt>
                                         <dd><?php echo htmlspecialchars($r['status']); ?> priority <strong><?php echo htmlspecialchars($r['priority']); ?></strong></dd>
                                     </div>
-                                    <div>
+                                    <div style="grid-column:1/-1;">
                                         <dt>Location</dt>
-                                        <dd style="font-weight:400;"><?php
-                                            $loc = $r['location'] ?? '';
+                                        <dd style="font-weight:400;margin:0.25rem 0 0;">
+                                            <?php if ($caseLat !== null && $caseLon !== null): ?>
+                                            <div class="geo-location-block" style="margin:0;">
+                                                <p class="js-rescue-location geo-location-block__addr"
+                                                   data-lat="<?php echo htmlspecialchars((string) $caseLat, ENT_QUOTES, 'UTF-8'); ?>"
+                                                   data-lon="<?php echo htmlspecialchars((string) $caseLon, ENT_QUOTES, 'UTF-8'); ?>"
+                                                   data-case-id="<?php echo $cid ? (int) $cid : ''; ?>"
+                                                   data-needs-geocode="<?php echo $adminNeedsGeocode ? '1' : '0'; ?>"
+                                                   data-skip-geocode="<?php echo $adminNeedsGeocode ? '0' : '1'; ?>"><?php echo htmlspecialchars($adminLocText, ENT_QUOTES, 'UTF-8'); ?></p>
+                                                <button type="button" class="btn btn-secondary btn-sm js-admin-view-map"
+                                                        data-lat="<?php echo htmlspecialchars((string) $caseLat, ENT_QUOTES, 'UTF-8'); ?>"
+                                                        data-lon="<?php echo htmlspecialchars((string) $caseLon, ENT_QUOTES, 'UTF-8'); ?>"
+                                                        data-map-id="admin-case-map-<?php echo (int) $r['id']; ?>"
+                                                        data-title="Request #<?php echo (int) $r['id']; ?> — animal">View on Map</button>
+                                                <div id="admin-case-map-<?php echo (int) $r['id']; ?>" class="geo-map-mini" hidden></div>
+                                            </div>
+                                            <?php else: ?>
+                                            <?php
+                                            $locOnly = $locNotes !== '' ? $locNotes : '—';
                                             if (function_exists('mb_strimwidth')) {
-                                                echo htmlspecialchars(mb_strimwidth($loc, 0, 120, '…'));
-                                            } else {
-                                                echo htmlspecialchars(strlen($loc) > 120 ? substr($loc, 0, 117) . '…' : $loc);
+                                                $locOnly = mb_strimwidth($locOnly, 0, 120, '…');
+                                            } elseif (strlen($locOnly) > 120) {
+                                                $locOnly = substr($locOnly, 0, 117) . '…';
                                             }
-                                        ?></dd>
+                                            echo htmlspecialchars($locOnly, ENT_QUOTES, 'UTF-8');
+                                            ?>
+                                            <?php endif; ?>
+                                        </dd>
                                     </div>
                                     <div style="grid-column:1/-1;">
                                         <dt>Description</dt>
@@ -974,5 +1001,23 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 <?php endif; ?>
+
+<script src="assets/js/rescuer-geocode.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.js-admin-view-map').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (!window.LocationGeocode) return;
+            var lat = parseFloat(btn.getAttribute('data-lat') || '');
+            var lon = parseFloat(btn.getAttribute('data-lon') || '');
+            var mapId = btn.getAttribute('data-map-id');
+            if (isNaN(lat) || isNaN(lon) || !mapId) return;
+            LocationGeocode.openInlineMap(mapId, lat, lon, btn.getAttribute('data-title') || 'Rescue location');
+            var el = document.getElementById(mapId);
+            if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+    });
+});
+</script>
 
 <?php require_once 'includes/footer.php'; ?>

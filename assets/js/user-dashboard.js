@@ -20,11 +20,16 @@
         if (la) la.value = String(lat);
         if (lo) lo.value = String(lng);
         if (hint) {
-            hint.textContent = 'Pin set: ' + lat.toFixed(5) + ', ' + lng.toFixed(5);
+            hint.textContent = 'Pin set: ' + lat.toFixed(5) + ', ' + lng.toFixed(5) + ' — loading address…';
         }
         if (marker && map) {
             marker.setLatLng([lat, lng]);
             map.panTo([lat, lng]);
+        }
+        if (window.LocationGeocode && hint) {
+            window.LocationGeocode.fetchAddress(lat, lng).then(function (addr) {
+                hint.textContent = addr;
+            });
         }
     }
 
@@ -420,6 +425,18 @@
         });
     }
 
+    function bindCaseMapButtons() {
+        qsa('.js-ud-view-map').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var lat = parseFloat(btn.getAttribute('data-lat') || '');
+                var lon = parseFloat(btn.getAttribute('data-lon') || '');
+                var mapId = btn.getAttribute('data-map-id');
+                if (isNaN(lat) || isNaN(lon) || !mapId || !window.LocationGeocode) return;
+                window.LocationGeocode.openInlineMap(mapId, lat, lon, btn.getAttribute('data-title') || 'Reported location');
+            });
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         themeSetup();
         var closeDrawer = drawerSetup();
@@ -430,6 +447,7 @@
         formGuard();
         flash();
         poll();
+        bindCaseMapButtons();
         setUnreadCount(Number(qs('#ud-notify-count') ? qs('#ud-notify-count').textContent : 0));
 
         var useLoc = qs('#ud-use-location');
