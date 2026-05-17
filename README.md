@@ -183,3 +183,9 @@ Aminal_rescye_system/
 ```
 
 For full SRS and AI workflow, see `docs/SRS.md` and `docs/AI_RESCUE_IMPLEMENTATION.md`.
+
+## Full location & geocoding guide
+
+Step-by-step documentation (database, HTML, CSS, JS, PHP, Leaflet, live tracking, admin/rescuer/user modules):
+
+**[docs/LOCATION_GEOCODING_GUIDE.md](docs/LOCATION_GEOCODING_GUIDE.md)**

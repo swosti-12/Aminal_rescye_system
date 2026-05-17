@@ -1491,6 +1491,23 @@ section { margin-bottom: 5rem; }
 }
 
 /* Reverse geocoding / map location blocks (shared) */
+.geo-address-preview {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin: 0.65rem 0 0;
+    padding: 0.65rem 0.85rem;
+    border-radius: 10px;
+    border: 1px solid #c7d2fe;
+    background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 100%);
+    font-size: 0.88rem;
+    line-height: 1.45;
+    color: #1e293b;
+}
+.geo-address-preview i {
+    color: #4f46e5;
+    margin-top: 0.15rem;
+}
 .geo-location-block {
     margin: 0.75rem 0 1rem;
     padding: 0.75rem 0.9rem;

@@ -218,7 +218,14 @@ require_once __DIR__ . '/includes/header.php';
                             </div>
                             <div class="line"><span>Phone</span><strong><?php echo htmlspecialchars($rescuer['phone'] ?: '-'); ?></strong></div>
                             <div class="line"><span>Distance</span><strong><?php echo htmlspecialchars($distanceText); ?></strong></div>
-                            <div class="line"><span>Coordinates</span><strong><?php echo htmlspecialchars((string)$rescuer['latitude']); ?>, <?php echo htmlspecialchars((string)$rescuer['longitude']); ?></strong></div>
+                            <div class="line">
+                                <span>Location</span>
+                                <strong class="js-rescue-location"
+                                        data-lat="<?php echo htmlspecialchars((string)$rescuer['latitude']); ?>"
+                                        data-lon="<?php echo htmlspecialchars((string)$rescuer['longitude']); ?>"
+                                        data-needs-geocode="1"
+                                        data-skip-geocode="0"><?php echo htmlspecialchars((string)$rescuer['latitude'] . ', ' . (string)$rescuer['longitude']); ?></strong>
+                            </div>
                             <form method="post" action="assign_rescuer.php" class="assign-form">
                                 <input type="hidden" name="request_id" value="<?php echo (int)$requestData['id']; ?>">
                                 <input type="hidden" name="rescuer_id" value="<?php echo (int)$rescuer['id']; ?>">

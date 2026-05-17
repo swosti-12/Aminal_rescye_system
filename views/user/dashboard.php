@@ -193,6 +193,10 @@ window.__USER_FLASH__ = <?php echo json_encode($flash ?? ['message' => '', 'type
                             <button type="button" class="btn btn-secondary" id="ud-map-search-btn"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Find</button>
                         </div>
                         <div id="ud-map" class="ud-map" role="application" aria-labelledby="ud-map-label"></div>
+                        <div class="geo-address-preview" id="ud-address-preview">
+                            <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+                            <span id="ud-address-text">📍 Address will appear when you set a pin or use GPS.</span>
+                        </div>
                         <div class="ud-map-actions">
                             <button type="button" class="btn btn-secondary" id="ud-use-location"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i> Use my location</button>
                             <span class="ud-coords" id="ud-coords-hint" aria-live="polite">No coordinates yet — pick a point or use GPS.</span>

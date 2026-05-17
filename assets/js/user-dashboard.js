@@ -26,10 +26,21 @@
             marker.setLatLng([lat, lng]);
             map.panTo([lat, lng]);
         }
-        if (window.LocationGeocode && hint) {
+        var addrEl = qs('#ud-address-text');
+        if (addrEl) {
+            addrEl.textContent = '📍 Loading address…';
+        }
+        if (window.LocationGeocode) {
             window.LocationGeocode.fetchAddress(lat, lng).then(function (addr) {
-                hint.textContent = addr;
+                if (hint) {
+                    hint.textContent = 'Pin: ' + lat.toFixed(5) + ', ' + lng.toFixed(5);
+                }
+                if (addrEl) {
+                    addrEl.textContent = '📍 ' + addr;
+                }
             });
+        } else if (addrEl) {
+            addrEl.textContent = '📍 ' + lat.toFixed(5) + ', ' + lng.toFixed(5);
         }
     }
 
