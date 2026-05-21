@@ -1,0 +1,14 @@
+# Image analysis stack (YOLOv8 + OpenCV + PyTorch)
+# Install into the same venv as the main Flask app:
+#
+#   cd "c:\xampp\htdocs\Animal rescue system"
+#   .\venv\Scripts\activate
+#   pip install -r requirements-ai.txt
+#
+# First YOLO run downloads yolov8n.pt (~6MB) automatically.
+# CPU-only PyTorch is fine for demos; for GPU, follow https://pytorch.org/
+
+opencv-python-headless>=4.8.0
+ultralytics>=8.0.0
+torch>=2.0.0
+torchvision>=0.15.0
