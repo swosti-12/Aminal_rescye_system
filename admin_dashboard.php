@@ -1,8 +1,11 @@
 <?php
 require_once 'backend/auth.php';
 require_once 'backend/site_settings_helper.php';
+require_once __DIR__ . '/backend/Services/CaseLifecycleService.php';
 require_login();
 require_role('admin');
+
+$caseLifecycle = new CaseLifecycleService($pdo);
 
 $msg = $_GET['msg'] ?? '';
 $tab = $_GET['tab'] ?? 'overview';
@@ -138,8 +141,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['admin_action'])) {
                         $pdo->prepare('UPDATE rescue_requests SET rescuer_id = ?, rescuer_notified = 1 WHERE id = ?')->execute([$assignId, $rid]);
                     }
                 } else {
+                    $caseLifecycle->updateCaseStatus($caseId, 'rejected', $adminId);
                     $pdo->prepare(
-                        "UPDATE rescue_cases SET status='rejected', priority_level='low', detected_injury_severity='low', assigned_rescuer_id = NULL WHERE id = ?"
+                        "UPDATE rescue_cases SET priority_level='low', detected_injury_severity='low', assigned_rescuer_id = NULL WHERE id = ?"
                     )->execute([$caseId]);
                     $pdo->prepare('UPDATE rescue_requests SET rescuer_id = NULL, rescuer_notified = 0 WHERE id = ?')->execute([$rid]);
                 }
@@ -155,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['admin_action'])) {
             if (!$caseId || !$rescuerId) {
                 throw new RuntimeException('Case and rescuer required.');
             }
-            $pdo->prepare('UPDATE rescue_cases SET assigned_rescuer_id = ?, status = IF(status = \'rejected\', \'pending\', status) WHERE id = ?')->execute([$rescuerId, $caseId]);
+            $pdo->prepare('UPDATE rescue_cases SET assigned_rescuer_id = ?, status = IF(status IN (\'rejected\',\'pending\'), \'assigned\', status) WHERE id = ?')->execute([$rescuerId, $caseId]);
             try {
                 $pdo->prepare('UPDATE rescue_requests SET rescuer_id = ?, rescuer_notified = 1 WHERE case_id = ?')->execute([$rescuerId, $caseId]);
             } catch (Throwable $e) {
@@ -168,18 +172,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['admin_action'])) {
 
         if ($action === 'case_status') {
             $caseId = (int)($_POST['case_id'] ?? 0);
-            $newStatus = $_POST['case_status'] ?? '';
-            $allowed = ['pending', 'accepted', 'resolved', 'rejected'];
-            if (!$caseId || !in_array($newStatus, $allowed, true)) {
+            $newStatus = trim((string)($_POST['case_status'] ?? ''));
+            if (!$caseId || $newStatus === '') {
                 throw new RuntimeException('Invalid case status.');
             }
-            if ($newStatus === 'resolved') {
-                $pdo->prepare("UPDATE rescue_cases SET status = ?, resolved_at = NOW() WHERE id = ?")->execute([$newStatus, $caseId]);
-            } else {
-                $pdo->prepare('UPDATE rescue_cases SET status = ? WHERE id = ?')->execute([$newStatus, $caseId]);
+            $result = $caseLifecycle->updateCaseStatus($caseId, $newStatus, $adminId);
+            if (!$result['ok']) {
+                throw new RuntimeException($result['message']);
             }
-            admin_audit_log($pdo, $adminId, 'case_status', 'rescue_cases', $caseId, $newStatus);
-            header('Location: admin_dashboard.php?tab=requests&msg=' . urlencode('Rescue status updated.'));
+            header('Location: admin_dashboard.php?tab=requests&msg=' . urlencode($result['message']));
             exit;
         }
 
@@ -294,15 +295,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
 
 // Stats
 $stats = [];
+$lifecycleCounters = ['active_requests' => 0, 'completed_today' => 0, 'archived_cases' => 0];
 try {
+    $lifecycleCounters = $caseLifecycle->getDashboardCounters();
     $stats['total_users'] = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role='user'")->fetchColumn();
     $stats['total_rescuers'] = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role='rescuer'")->fetchColumn();
     $stats['total_cases'] = (int)$pdo->query('SELECT COUNT(*) FROM rescue_cases')->fetchColumn();
-    $stats['pending'] = (int)$pdo->query("SELECT COUNT(*) FROM rescue_cases WHERE status='pending'")->fetchColumn();
-    $stats['in_progress'] = (int)$pdo->query("SELECT COUNT(*) FROM rescue_cases WHERE status='accepted'")->fetchColumn();
-    $stats['completed'] = (int)$pdo->query("SELECT COUNT(*) FROM rescue_cases WHERE status='resolved'")->fetchColumn();
+    $stats['pending'] = $lifecycleCounters['active_requests'];
+    $stats['in_progress'] = (int)$pdo->query("SELECT COUNT(*) FROM rescue_cases WHERE status IN ('in_progress','assigned','accepted') AND COALESCE(is_archived,0)=0")->fetchColumn();
+    $stats['completed'] = $lifecycleCounters['archived_cases'];
     $stats['rejected'] = (int)$pdo->query("SELECT COUNT(*) FROM rescue_cases WHERE status='rejected'")->fetchColumn();
-    $stats['req_accepted'] = (int)$pdo->query("SELECT COUNT(*) FROM rescue_requests WHERE status='Accepted'")->fetchColumn();
+    $stats['req_accepted'] = (int)$pdo->query("SELECT COUNT(*) FROM rescue_requests WHERE status='Accepted' AND COALESCE(is_archived,0)=0")->fetchColumn();
     $stats['req_rejected'] = (int)$pdo->query("SELECT COUNT(*) FROM rescue_requests WHERE status='Rejected'")->fetchColumn();
     $stats['low_confidence'] = (int)$pdo->query('SELECT COUNT(*) FROM rescue_requests WHERE confidence < 0.70')->fetchColumn();
     $stats['admin_overrides'] = (int)$pdo->query("SELECT COUNT(*) FROM rescue_requests WHERE decision_source='admin'")->fetchColumn();
@@ -314,37 +317,7 @@ $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ?');
 $stmt->execute([$_SESSION['user_id']]);
 $user_data = $stmt->fetch();
 
-$ai_requests = [];
-try {
-    $ai_requests = $pdo->query("
-        SELECT r.*, u.name AS reporter_name, u.email AS reporter_email,
-               c.animal_type, c.status AS case_status, c.id AS linked_case_id,
-               c.latitude AS case_latitude, c.longitude AS case_longitude, c.address AS case_address,
-               resc.name AS rescuer_name
-        FROM rescue_requests r
-        JOIN users u ON r.user_id = u.id
-        LEFT JOIN rescue_cases c ON r.case_id = c.id
-        LEFT JOIN users resc ON r.rescuer_id = resc.id
-        ORDER BY r.created_at DESC
-        LIMIT 200
-    ")->fetchAll();
-} catch (Throwable $e) {
-    $ai_requests = [];
-}
-
-$cases_list = [];
-try {
-    $cases_list = $pdo->query("
-        SELECT c.*, u.name AS reporter_name, rep.name AS rescuer_name
-        FROM rescue_cases c
-        JOIN users u ON c.reporter_id = u.id
-        LEFT JOIN users rep ON c.assigned_rescuer_id = rep.id
-        ORDER BY c.created_at DESC
-        LIMIT 100
-    ")->fetchAll();
-} catch (Throwable $e) {
-    $cases_list = [];
-}
+$ai_requests = $caseLifecycle->getActiveQueue(200);
 
 $all_users = [];
 try {
@@ -381,11 +354,21 @@ try {
     $activity_log = [];
 }
 
-$notifications = $pdo->query("
-    SELECT * FROM rescue_cases
-    WHERE status IN ('pending','accepted') OR priority_level IN ('high','urgent')
-    ORDER BY created_at DESC LIMIT 8
-")->fetchAll();
+try {
+    $notifications = $pdo->query("
+        SELECT * FROM rescue_cases
+        WHERE COALESCE(is_archived, 0) = 0
+          AND status IN ('pending','under_review','assigned','in_progress','accepted')
+        ORDER BY FIELD(priority_level, 'urgent', 'high', 'medium', 'low'), created_at DESC
+        LIMIT 8
+    ")->fetchAll();
+} catch (Throwable $e) {
+    $notifications = $pdo->query("
+        SELECT * FROM rescue_cases
+        WHERE status IN ('pending','accepted') OR priority_level IN ('high','urgent')
+        ORDER BY created_at DESC LIMIT 8
+    ")->fetchAll();
+}
 
 $about_intro = get_site_setting($pdo, 'about_intro', '');
 $contact_address = get_site_setting($pdo, 'contact_address', '');
@@ -463,13 +446,36 @@ $body_class = 'admin-dashboard-page';
         <div id="tab-requests" class="admin-section <?php echo $tab === 'requests' ? 'active' : ''; ?>">
             <header class="admin-page-header">
                 <h1>AI supervision &amp; requests</h1>
-                <p>Each row is a clear card: verify the image and AI verdict, then use grouped actions to override, assign a rescuer, move the case along, or remove spam.</p>
+                <p>Active queue shows only cases needing action. Completed and closed cases move to Case History automatically.</p>
             </header>
 
+            <div class="ars-lifecycle-stats" aria-label="Queue counters">
+                <div class="ars-lifecycle-stat ars-lifecycle-stat--active">
+                    <div class="num" id="ars-count-active"><?php echo (int)($lifecycleCounters['active_requests'] ?? 0); ?></div>
+                    <div class="lbl">Active requests</div>
+                </div>
+                <div class="ars-lifecycle-stat ars-lifecycle-stat--today">
+                    <div class="num" id="ars-count-today"><?php echo (int)($lifecycleCounters['completed_today'] ?? 0); ?></div>
+                    <div class="lbl">Completed today</div>
+                </div>
+                <div class="ars-lifecycle-stat ars-lifecycle-stat--archived">
+                    <div class="num" id="ars-count-archived"><?php echo (int)($lifecycleCounters['archived_cases'] ?? 0); ?></div>
+                    <div class="lbl">Archived cases</div>
+                </div>
+            </div>
+
+            <nav class="ars-queue-subnav" aria-label="Queue sections">
+                <button type="button" class="active" data-queue-pane="active"><i class="fa-solid fa-bolt"></i> Active rescue queue</button>
+                <button type="button" data-queue-pane="history"><i class="fa-solid fa-box-archive"></i> Archived / history</button>
+            </nav>
+
+            <div id="ars-pane-active" class="ars-queue-pane active">
             <div class="admin-panel">
-                <h2 class="admin-panel__title"><i class="fa-solid fa-images text-primary" aria-hidden="true"></i> Rescue request queue</h2>
+                <h2 class="admin-panel__title"><i class="fa-solid fa-images text-primary" aria-hidden="true"></i> Active rescue queue</h2>
+                <p style="margin:0 0 1rem;font-size:0.85rem;color:#64748b;">Pending, under review, assigned, and in-progress cases only. Run <code>database/migrate_case_lifecycle.sql</code> if archive fields are missing.</p>
+                <div id="ars-active-queue">
                 <?php if (empty($ai_requests)): ?>
-                    <p style="margin:0; color:#64748b;">No data in <code>rescue_requests</code> yet, or run <code>database/migrate_admin_features.sql</code> for <code>case_id</code> / <code>decision_source</code>.</p>
+                    <p class="ars-queue-empty" style="margin:0; color:#64748b;">No active requests in queue. Completed cases appear under Case History.</p>
                 <?php else: ?>
                     <?php foreach ($ai_requests as $r): ?>
                         <?php
@@ -482,10 +488,17 @@ $body_class = 'admin-dashboard-page';
                         $locNotes = trim((string) ($r['location'] ?? ''));
                         $adminLocText = $caseAddr !== '' ? $caseAddr : ($locNotes !== '' ? $locNotes : ($caseLat !== null ? $caseLat . ', ' . $caseLon : '—'));
                         $adminNeedsGeocode = $caseLat !== null && $caseLon !== null && $caseAddr === '' && !preg_match('/^-?\d+\.?\d*,\s*-?\d+\.?\d*$/', $locNotes);
+                        $caseStatusRaw = $r['case_status'] ?? 'pending';
+                        $caseStatusNorm = CaseLifecycleService::normalizeStatus((string)$caseStatusRaw);
+                        $statusBadgeClass = $caseLifecycle->statusBadgeClass($caseStatusRaw);
+                        $statusBadgeLabel = $caseLifecycle->statusLabel($caseStatusRaw);
                         ?>
-                        <article class="admin-request-card">
+                        <article class="admin-request-card"<?php echo $cid ? ' data-case-id="' . (int)$cid . '"' : ''; ?>>
                             <div class="admin-request-card__head">
                                 <strong>Request #<?php echo (int)$r['id']; ?></strong>
+                                <?php if ($cid): ?>
+                                <span class="ars-badge <?php echo htmlspecialchars($statusBadgeClass); ?> js-case-status-badge"><?php echo htmlspecialchars($statusBadgeLabel); ?></span>
+                                <?php endif; ?>
                                 <span class="admin-badge-pill <?php echo $src === 'admin' ? 'admin-badge-pill--admin' : 'admin-badge-pill--ai'; ?>"><?php echo strtoupper($src); ?> decision</span>
                                 <?php if ($lowC): ?><span class="admin-badge-pill admin-badge-pill--risk">Low confidence</span><?php endif; ?>
                                 <?php if ($r['status'] === 'Accepted'): ?><span class="admin-badge-pill admin-badge-pill--ok">Accepted</span><?php else: ?><span class="admin-badge-pill admin-badge-pill--risk">Rejected</span><?php endif; ?>
@@ -586,16 +599,23 @@ $body_class = 'admin-dashboard-page';
                                     </div>
                                     <div class="action-group">
                                         <h4>Case lifecycle</h4>
-                                        <form method="post">
-                                            <input type="hidden" name="admin_action" value="case_status">
-                                            <input type="hidden" name="case_id" value="<?php echo $cid; ?>">
+                                        <form class="js-case-status-form" data-case-id="<?php echo $cid; ?>" method="post" action="backend/api/admin_update_case_status.php">
                                             <select name="case_status" class="form-control">
-                                                <option value="pending">Pending</option>
-                                                <option value="accepted">In progress</option>
-                                                <option value="resolved">Completed</option>
-                                                <option value="rejected">Rejected</option>
+                                                <optgroup label="Active (stays in queue)">
+                                                    <option value="pending" <?php echo $caseStatusNorm === 'pending' ? 'selected' : ''; ?>>Pending</option>
+                                                    <option value="under_review" <?php echo $caseStatusNorm === 'under_review' ? 'selected' : ''; ?>>Under review</option>
+                                                    <option value="assigned" <?php echo $caseStatusNorm === 'assigned' ? 'selected' : ''; ?>>Assigned</option>
+                                                    <option value="in_progress" <?php echo $caseStatusNorm === 'in_progress' ? 'selected' : ''; ?>>In progress</option>
+                                                </optgroup>
+                                                <optgroup label="Archive (moves to history)">
+                                                    <option value="completed" <?php echo in_array($caseStatusNorm, ['completed','resolved'], true) ? 'selected' : ''; ?>>Completed</option>
+                                                    <option value="rescued" <?php echo $caseStatusNorm === 'rescued' ? 'selected' : ''; ?>>Rescued</option>
+                                                    <option value="closed" <?php echo $caseStatusNorm === 'closed' ? 'selected' : ''; ?>>Closed</option>
+                                                    <option value="rejected" <?php echo $caseStatusNorm === 'rejected' ? 'selected' : ''; ?>>Rejected</option>
+                                                    <option value="spam" <?php echo $caseStatusNorm === 'spam' ? 'selected' : ''; ?>>Spam</option>
+                                                </optgroup>
                                             </select>
-                                            <button type="submit" class="btn btn-secondary">Update status</button>
+                                            <button type="submit" class="btn btn-secondary js-update-status-btn">Update status</button>
                                         </form>
                                     </div>
                                     <div class="action-group">
@@ -616,39 +636,71 @@ $body_class = 'admin-dashboard-page';
                         </article>
                     <?php endforeach; ?>
                 <?php endif; ?>
+                </div>
+            </div>
             </div>
 
-            <div class="admin-panel" style="overflow-x:auto;">
-                <h2 class="admin-panel__title"><i class="fa-solid fa-route text-primary" aria-hidden="true"></i> Recent cases (lifecycle overview)</h2>
-                <table class="admin-data-table">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Animal</th>
-                            <th>Status</th>
-                            <th>Priority</th>
-                            <th>Reporter</th>
-                            <th>Rescuer</th>
-                            <th>Created</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    <?php foreach ($cases_list as $c): ?>
-                        <tr>
-                            <td>#<?php echo (int)$c['id']; ?></td>
-                            <td><?php echo htmlspecialchars($c['animal_type']); ?></td>
-                            <td><?php echo htmlspecialchars($c['status']); ?></td>
-                            <td><?php echo htmlspecialchars($c['priority_level']); ?></td>
-                            <td><?php echo htmlspecialchars($c['reporter_name']); ?></td>
-                            <td><?php echo htmlspecialchars($c['rescuer_name'] ?? '—'); ?></td>
-                            <td><?php echo date('M j, H:i', strtotime($c['created_at'])); ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                    <?php if (empty($cases_list)): ?>
-                        <tr><td colspan="7" style="padding:1.25rem; color:#64748b;">No cases yet.</td></tr>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
+            <div id="ars-pane-history" class="ars-queue-pane">
+            <div class="admin-panel">
+                <h2 class="admin-panel__title"><i class="fa-solid fa-box-archive text-primary" aria-hidden="true"></i> Archived / case history</h2>
+                <div class="ars-history-filters">
+                    <input type="search" id="ars-filter-search" class="form-control" placeholder="Search animal, reporter, ID…" aria-label="Search">
+                    <select id="ars-filter-status" class="form-control" aria-label="Status filter">
+                        <option value="">All statuses</option>
+                        <option value="completed">Completed</option>
+                        <option value="rescued">Rescued</option>
+                        <option value="closed">Closed</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="spam">Spam</option>
+                    </select>
+                    <input type="date" id="ars-filter-date-from" class="form-control" aria-label="From date">
+                    <input type="date" id="ars-filter-date-to" class="form-control" aria-label="To date">
+                    <select id="ars-filter-rescuer" class="form-control" aria-label="Rescuer filter">
+                        <option value="">All rescuers</option>
+                        <?php foreach ($rescuers_list as $resc): ?>
+                        <option value="<?php echo (int)$resc['id']; ?>"><?php echo htmlspecialchars($resc['name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <button type="button" class="btn btn-primary" id="ars-history-apply"><i class="fa-solid fa-filter"></i> Apply filters</button>
+                </div>
+                <div class="ars-history-table-wrap">
+                    <table class="admin-data-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Animal</th>
+                                <th>Status</th>
+                                <th>Priority</th>
+                                <th>Reporter</th>
+                                <th>Rescuer</th>
+                                <th>Created</th>
+                                <th>Archived</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ars-history-tbody">
+                            <tr><td colspan="8" style="padding:1.25rem;color:#94a3b8;">Open this tab to load archived cases.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="ars-history-pagination">
+                    <span id="ars-history-meta" style="font-size:0.85rem;color:#64748b;"></span>
+                    <div style="display:flex;gap:0.5rem;">
+                        <button type="button" class="btn btn-secondary btn-sm" id="ars-history-prev" disabled>Previous</button>
+                        <button type="button" class="btn btn-secondary btn-sm" id="ars-history-next" disabled>Next</button>
+                    </div>
+                </div>
+            </div>
+            </div>
+        </div>
+
+        <div id="ars-archive-modal" class="ars-archive-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ars-archive-title">
+            <div class="ars-archive-modal">
+                <h3 id="ars-archive-title">Archive this case?</h3>
+                <p>Are you sure you want to archive this case? It will be marked as read, removed from the active queue, and moved to Case History. The reporter and assigned rescuer will be notified.</p>
+                <div class="ars-archive-modal__actions">
+                    <button type="button" class="btn btn-secondary" id="ars-archive-cancel">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="ars-archive-confirm">Yes, archive</button>
+                </div>
             </div>
         </div>
 
@@ -1002,6 +1054,8 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 <?php endif; ?>
 
+<link rel="stylesheet" href="assets/css/admin-queue.css">
+<script src="assets/js/admin-queue.js"></script>
 <script src="assets/js/rescuer-geocode.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {

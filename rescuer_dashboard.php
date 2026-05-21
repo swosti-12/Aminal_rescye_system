@@ -1,8 +1,11 @@
 <?php
 require_once 'backend/auth.php';
 require_once __DIR__ . '/backend/Services/GeocodingService.php';
+require_once __DIR__ . '/backend/Services/CaseLifecycleService.php';
 require_login();
 require_role('rescuer');
+
+$caseLifecycle = new CaseLifecycleService($pdo);
 
 $msg = '';
 $rescuerId = (int)$_SESSION['user_id'];
@@ -166,7 +169,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'], $_POST['cas
     if (!rescuer_owns_case($pdo, $case_id, $rescuerId)) {
         $msg = 'Invalid case.';
     } elseif ($action === 'start_progress') {
-        $pdo->prepare("UPDATE rescue_cases SET status='accepted' WHERE id=? AND assigned_rescuer_id=? AND status='pending'")
+        $pdo->prepare("UPDATE rescue_cases SET status='in_progress' WHERE id=? AND assigned_rescuer_id=? AND status IN ('pending','assigned','accepted')")
             ->execute([$case_id, $rescuerId]);
         notify_reporter($pdo, $case_id, 'Request in progress: your assigned rescuer has started moving to the location.', 'in_progress');
         notify_admin($pdo, $case_id, $rescuerId, 'Rescuer #' . $rescuerId . ' started rescue for Case #' . $case_id, 'status_change');
@@ -203,8 +206,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'], $_POST['cas
             }
             $fullNotes = "Animal condition (after rescue): " . $animal_condition . "\n\nRescuer report: " . $notes;
             $pdo->prepare(
-                "UPDATE rescue_cases SET status='resolved', resolution_notes=?, proof_image_path=COALESCE(?, proof_image_path), resolved_at=NOW() WHERE id=? AND assigned_rescuer_id=?"
+                "UPDATE rescue_cases SET resolution_notes=?, proof_image_path=COALESCE(?, proof_image_path) WHERE id=? AND assigned_rescuer_id=?"
             )->execute([$fullNotes, $proof_path, $case_id, $rescuerId]);
+            $adminRow = $pdo->query("SELECT id FROM users WHERE role='admin' ORDER BY id ASC LIMIT 1")->fetch();
+            $auditAdminId = $adminRow ? (int)$adminRow['id'] : $rescuerId;
+            $caseLifecycle->updateCaseStatus($case_id, 'rescued', $auditAdminId);
             notify_reporter($pdo, $case_id, 'Animal rescued successfully. Your case has been marked as completed.', 'resolved');
             notify_admin($pdo, $case_id, $rescuerId, 'Case #' . $case_id . ' resolved by Rescuer #' . $rescuerId . '. Animal condition: ' . substr($animal_condition, 0, 100), 'status_change');
             rescuer_audit_log($pdo, $rescuerId, $case_id, 'complete_rescue', substr($animal_condition, 0, 200));
@@ -239,12 +245,13 @@ $sqlCases = "
     INNER JOIN users u ON c.reporter_id = u.id
     LEFT JOIN rescue_requests rr ON rr.case_id = c.id
     WHERE c.assigned_rescuer_id = ?
-      AND c.status != 'rejected'
+      AND COALESCE(c.is_archived, 0) = 0
+      AND c.status NOT IN ('rejected','completed','closed','rescued','spam','resolved')
       AND (
             (rr.id IS NOT NULL AND rr.status = 'Accepted' AND rr.priority = 'High')
          OR (rr.id IS NULL AND c.priority_level IN ('high', 'urgent'))
       )
-    ORDER BY FIELD(c.status, 'pending', 'accepted', 'resolved'),
+    ORDER BY FIELD(c.status, 'pending', 'assigned', 'in_progress', 'accepted'),
              FIELD(c.priority_level, 'urgent', 'high', 'medium', 'low'),
              c.created_at DESC
 ";

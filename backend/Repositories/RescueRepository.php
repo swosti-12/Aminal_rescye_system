@@ -48,15 +48,26 @@ final class RescueRepository
      */
     public function getReporterStats(int $userId): array
     {
-        $st = $this->pdo->prepare(
-            'SELECT
-                COUNT(*) AS total,
-                SUM(CASE WHEN status IN (\'pending\',\'accepted\') THEN 1 ELSE 0 END) AS active,
-                SUM(CASE WHEN status = \'resolved\' THEN 1 ELSE 0 END) AS completed
-             FROM rescue_cases WHERE reporter_id = ?'
-        );
-        $st->execute([$userId]);
-        $row = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+        try {
+            $st = $this->pdo->prepare(
+                'SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN COALESCE(is_archived,0)=0 AND status IN (\'pending\',\'under_review\',\'assigned\',\'in_progress\',\'accepted\') THEN 1 ELSE 0 END) AS active,
+                    SUM(CASE WHEN COALESCE(is_archived,0)=1 OR status IN (\'completed\',\'rescued\',\'resolved\',\'closed\') THEN 1 ELSE 0 END) AS completed
+                 FROM rescue_cases WHERE reporter_id = ?'
+            );
+            $st->execute([$userId]);
+            $row = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+        } catch (Throwable $e) {
+            $st = $this->pdo->prepare(
+                'SELECT COUNT(*) AS total,
+                    SUM(CASE WHEN status IN (\'pending\',\'accepted\') THEN 1 ELSE 0 END) AS active,
+                    SUM(CASE WHEN status = \'resolved\' THEN 1 ELSE 0 END) AS completed
+                 FROM rescue_cases WHERE reporter_id = ?'
+            );
+            $st->execute([$userId]);
+            $row = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+        }
         return [
             'total' => (int) ($row['total'] ?? 0),
             'active' => (int) ($row['active'] ?? 0),
@@ -144,10 +155,11 @@ final class RescueRepository
             return 'Not dispatched (AI)';
         }
         return match ($c['status']) {
-            'resolved' => 'Rescue completed',
-            'accepted' => 'Rescuer in progress',
+            'resolved', 'completed', 'rescued' => 'Rescue completed',
+            'accepted', 'in_progress', 'assigned' => 'Rescuer in progress',
+            'under_review' => 'Under review',
             'pending' => 'Awaiting assignment / in queue',
-            'rejected' => 'Closed',
+            'rejected', 'closed', 'spam' => 'Closed',
             default => (string) $c['status'],
         };
     }
