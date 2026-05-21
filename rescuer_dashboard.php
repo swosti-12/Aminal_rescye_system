@@ -277,16 +277,17 @@ try {
     // rescue_updates table may not exist yet
 }
 
-$active_cases = array_values(array_filter($all_cases, function ($c) {
-    return in_array($c['status'], ['pending', 'accepted'], true);
+$active_statuses = ['pending', 'assigned', 'in_progress', 'accepted'];
+$active_cases = array_values(array_filter($all_cases, function ($c) use ($active_statuses) {
+    return in_array($c['status'], $active_statuses, true);
 }));
 $completed_cases = array_values(array_filter($all_cases, function ($c) {
-    return $c['status'] === 'resolved';
+    return in_array($c['status'], ['resolved', 'completed', 'rescued', 'closed'], true);
 }));
 
 $stats = [
-    'pending' => count(array_filter($active_cases, fn($c) => $c['status'] === 'pending')),
-    'in_progress' => count(array_filter($active_cases, fn($c) => $c['status'] === 'accepted')),
+    'pending' => count(array_filter($active_cases, fn($c) => in_array($c['status'], ['pending', 'assigned'], true))),
+    'in_progress' => count(array_filter($active_cases, fn($c) => in_array($c['status'], ['in_progress', 'accepted'], true))),
     'completed' => count($completed_cases),
 ];
 $urgent_active = array_filter($active_cases, function ($c) {
@@ -454,7 +455,7 @@ $body_class = 'rescuer-dashboard-page';
                 <div class="rescuer-grid">
                     <?php foreach ($active_cases as $case): ?>
                         <?php
-                        $workflow = $case['status'] === 'pending' ? 'pending' : 'in_progress';
+                        $workflow = in_array($case['status'], ['pending', 'assigned'], true) ? 'pending' : 'in_progress';
                         $locMeta = rescuer_case_location_meta($case);
                         $locText = $locMeta['text'];
                         $detailPayload = json_encode([
@@ -529,7 +530,7 @@ $body_class = 'rescuer-dashboard-page';
                                     <i class="fa-solid fa-expand"></i> View details &amp; map
                                 </button>
 
-                                <?php if ($case['status'] === 'pending'): ?>
+                                <?php if (in_array($case['status'], ['pending', 'assigned'], true)): ?>
                                     <form method="post" style="margin-bottom:0.5rem;">
                                         <input type="hidden" name="case_id" value="<?php echo (int)$case['id']; ?>">
                                         <input type="hidden" name="action" value="start_progress">
@@ -537,7 +538,7 @@ $body_class = 'rescuer-dashboard-page';
                                     </form>
                                 <?php endif; ?>
 
-                                <?php if ($case['status'] === 'accepted'): ?>
+                                <?php if (in_array($case['status'], ['in_progress', 'accepted'], true)): ?>
                                     <form method="post" style="margin-bottom:0.5rem;">
                                         <input type="hidden" name="case_id" value="<?php echo (int)$case['id']; ?>">
                                         <input type="hidden" name="action" value="arrived">

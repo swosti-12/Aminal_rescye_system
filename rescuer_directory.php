@@ -345,6 +345,56 @@ require_once __DIR__ . '/includes/header.php';
     font-weight: 600;
     color: #0f172a;
 }
+.rd-case-banner .meta-item--wide {
+    flex: 1 1 100%;
+    min-width: 280px;
+}
+.rd-location-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    margin-top: 0.35rem;
+}
+.rd-location-link {
+    color: #4f46e5;
+    text-decoration: underline;
+    cursor: pointer;
+    font-weight: 600;
+    border: none;
+    background: none;
+    padding: 0;
+    font-size: inherit;
+    text-align: left;
+}
+.rd-location-link:hover {
+    color: #3730a3;
+}
+.rd-view-map-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.85rem;
+    border-radius: 10px;
+    border: 1px solid #c7d2fe;
+    background: #eef2ff;
+    color: #4338ca;
+    font-weight: 700;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.15s;
+}
+.rd-view-map-btn:hover {
+    background: #e0e7ff;
+    transform: translateY(-1px);
+}
+#rd-case-map.geo-map-mini {
+    min-height: 280px;
+    width: 100%;
+    margin-top: 0.75rem;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+}
 /* Grid of rescuer cards */
 .rd-grid {
     display: grid;
@@ -531,20 +581,34 @@ require_once __DIR__ . '/includes/header.php';
             <span class="meta-label">Priority</span>
             <span class="meta-value"><?php echo htmlspecialchars($caseData['priority_level']); ?></span>
         </div>
-        <?php if (!empty($caseData['latitude'])): ?>
+        <?php
+        $caseLat = isset($caseData['latitude']) && $caseData['latitude'] !== '' && $caseData['latitude'] !== null
+            ? (float)$caseData['latitude'] : null;
+        $caseLon = isset($caseData['longitude']) && $caseData['longitude'] !== '' && $caseData['longitude'] !== null
+            ? (float)$caseData['longitude'] : null;
+        if ($caseLat !== null && $caseLon !== null):
+        ?>
         <div class="meta-item meta-item--wide">
-            <span class="meta-label">Location</span>
-            <span class="meta-value js-rescue-location"
-                  data-lat="<?php echo htmlspecialchars((string)$caseData['latitude']); ?>"
-                  data-lon="<?php echo htmlspecialchars((string)$caseData['longitude']); ?>"
-                  data-case-id="<?php echo (int)($caseData['id'] ?? 0); ?>"
-                  data-needs-geocode="1"
-                  data-skip-geocode="0"><?php echo htmlspecialchars($caseData['latitude']); ?>, <?php echo htmlspecialchars($caseData['longitude']); ?></span>
-            <button type="button" class="btn btn-secondary btn-sm js-rd-view-map"
-                    data-lat="<?php echo htmlspecialchars((string)$caseData['latitude']); ?>"
-                    data-lon="<?php echo htmlspecialchars((string)$caseData['longitude']); ?>"
-                    data-title="Case #<?php echo (int)($caseData['id'] ?? 0); ?>">View on Map</button>
-            <div id="rd-case-map" class="geo-map-mini" hidden></div>
+            <span class="meta-label">Request location</span>
+            <div class="rd-location-row">
+                <span class="js-rescue-location js-rd-view-map rd-location-link rd-location-text"
+                      data-lat="<?php echo htmlspecialchars((string)$caseLat); ?>"
+                      data-lon="<?php echo htmlspecialchars((string)$caseLon); ?>"
+                      data-case-id="<?php echo (int)($caseData['id'] ?? 0); ?>"
+                      data-needs-geocode="1"
+                      data-skip-geocode="0"
+                      role="button"
+                      tabindex="0"
+                      data-title="Case #<?php echo (int)($caseData['id'] ?? 0); ?> — rescue request"
+                      title="Click to view on map"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> <?php echo htmlspecialchars($caseLat); ?>, <?php echo htmlspecialchars($caseLon); ?></span>
+                <button type="button" class="rd-view-map-btn js-rd-view-map"
+                        data-lat="<?php echo htmlspecialchars((string)$caseLat); ?>"
+                        data-lon="<?php echo htmlspecialchars((string)$caseLon); ?>"
+                        data-title="Case #<?php echo (int)($caseData['id'] ?? 0); ?> — rescue request">
+                    <i class="fa-solid fa-map" aria-hidden="true"></i> View on Map
+                </button>
+            </div>
+            <div id="rd-case-map" class="geo-map-mini" hidden aria-label="Map showing rescue request location"></div>
         </div>
         <?php endif; ?>
     </div>
@@ -609,14 +673,33 @@ require_once __DIR__ . '/includes/header.php';
 
 <script src="assets/js/rescuer-geocode.js"></script>
 <script>
+function rdOpenCaseMap(triggerEl) {
+    if (!window.LocationGeocode) return;
+    var lat = parseFloat(triggerEl.getAttribute('data-lat') || '');
+    var lon = parseFloat(triggerEl.getAttribute('data-lon') || '');
+    if (isNaN(lat) || isNaN(lon)) return;
+    var mapEl = document.getElementById('rd-case-map');
+    LocationGeocode.openInlineMap('rd-case-map', lat, lon, triggerEl.getAttribute('data-title') || 'Case location');
+    if (mapEl) {
+        mapEl.hidden = false;
+        mapEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        setTimeout(function () {
+            if (mapEl._leaflet_map) mapEl._leaflet_map.invalidateSize();
+        }, 350);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.js-rd-view-map').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            if (!window.LocationGeocode) return;
-            var lat = parseFloat(btn.getAttribute('data-lat') || '');
-            var lon = parseFloat(btn.getAttribute('data-lon') || '');
-            if (isNaN(lat) || isNaN(lon)) return;
-            LocationGeocode.openInlineMap('rd-case-map', lat, lon, btn.getAttribute('data-title') || 'Case location');
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            rdOpenCaseMap(btn);
+        });
+        btn.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                rdOpenCaseMap(btn);
+            }
         });
     });
     // Disable button on submit to prevent double-click

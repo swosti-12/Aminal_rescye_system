@@ -196,9 +196,25 @@
         historyBody.innerHTML = '<tr><td colspan="8" style="padding:1.25rem;color:#94a3b8;">Loading…</td></tr>';
 
         fetch('backend/api/admin_case_history.php?' + params.toString(), { credentials: 'same-origin' })
-            .then(function (r) { return r.json(); })
+            .then(function (r) {
+                if (!r.ok) {
+                    throw new Error('HTTP ' + r.status);
+                }
+                return r.text().then(function (text) {
+                    try {
+                        return JSON.parse(text);
+                    } catch (e) {
+                        throw new Error('Invalid JSON response');
+                    }
+                });
+            })
             .then(function (data) {
-                if (!data.ok || !data.items || data.items.length === 0) {
+                if (!data || !data.ok) {
+                    var errMsg = (data && data.error) ? data.error : 'Could not load history.';
+                    historyBody.innerHTML = '<tr><td colspan="8" style="padding:1.25rem;color:#dc2626;">' + escapeHtml(errMsg) + '</td></tr>';
+                    return;
+                }
+                if (!data.items || data.items.length === 0) {
                     historyBody.innerHTML = '<tr><td colspan="8" style="padding:1.25rem;color:#64748b;">No archived cases match your filters.</td></tr>';
                     if (historyMeta) {
                         historyMeta.textContent = '0 results';
@@ -225,8 +241,9 @@
                 }
                 bindHistoryPagination(data.page, data.total_pages || 1);
             })
-            .catch(function () {
-                historyBody.innerHTML = '<tr><td colspan="8" style="color:#dc2626;">Failed to load history. Run database/migrate_case_lifecycle.sql</td></tr>';
+            .catch(function (err) {
+                var msg = err && err.message ? err.message : 'Network error';
+                historyBody.innerHTML = '<tr><td colspan="8" style="padding:1.25rem;color:#dc2626;">Failed to load history: ' + escapeHtml(msg) + '. Check that you are logged in as admin.</td></tr>';
             });
     }
 

@@ -301,7 +301,7 @@ final class CaseLifecycleService
         $perPage = min(50, max(10, (int) ($filters['per_page'] ?? 20)));
         $offset = ($page - 1) * $perPage;
 
-        $where = ['COALESCE(c.is_archived, 0) = 1'];
+        $where = ['(COALESCE(c.is_archived, 0) = 1 OR c.status IN (\'completed\',\'closed\',\'rescued\',\'spam\',\'rejected\',\'resolved\'))'];
         $params = [];
 
         if (!empty($filters['status'])) {
@@ -341,11 +341,16 @@ final class CaseLifecycleService
 
             $sql = "
                 SELECT c.*, u.name AS reporter_name, rep.name AS rescuer_name,
-                       r.id AS request_id, r.ai_result, r.confidence, r.status AS request_status
+                       rr.id AS request_id, rr.ai_result, rr.confidence, rr.status AS request_status
                 FROM rescue_cases c
                 JOIN users u ON c.reporter_id = u.id
                 LEFT JOIN users rep ON c.assigned_rescuer_id = rep.id
-                LEFT JOIN rescue_requests r ON r.case_id = c.id
+                LEFT JOIN (
+                    SELECT case_id, MAX(id) AS max_req_id
+                    FROM rescue_requests
+                    GROUP BY case_id
+                ) latest ON latest.case_id = c.id
+                LEFT JOIN rescue_requests rr ON rr.id = latest.max_req_id
                 WHERE {$whereSql}
                 ORDER BY COALESCE(c.archived_at, c.resolved_at, c.created_at) DESC
                 LIMIT {$perPage} OFFSET {$offset}
@@ -356,7 +361,8 @@ final class CaseLifecycleService
 
             return ['items' => $items, 'total' => $total, 'page' => $page, 'per_page' => $perPage];
         } catch (Throwable $e) {
-            return ['items' => [], 'total' => 0, 'page' => $page, 'per_page' => $perPage];
+            error_log('getArchivedHistory: ' . $e->getMessage());
+            return ['items' => [], 'total' => 0, 'page' => $page, 'per_page' => $perPage, 'error' => $e->getMessage()];
         }
     }
 

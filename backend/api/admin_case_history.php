@@ -24,7 +24,7 @@ $result = $service->getArchivedHistory([
 
 $items = [];
 foreach ($result['items'] as $c) {
-    $status = (string) ($c['status'];
+    $status = (string) ($c['status'] ?? '');
     $items[] = [
         'case_id' => (int) $c['id'],
         'request_id' => isset($c['request_id']) ? (int) $c['request_id'] : null,
@@ -49,4 +49,5 @@ echo json_encode([
     'page' => $result['page'],
     'per_page' => $result['per_page'],
     'total_pages' => $result['per_page'] > 0 ? (int) ceil($result['total'] / $result['per_page']) : 0,
+    'error' => $result['error'] ?? null,
 ]);
